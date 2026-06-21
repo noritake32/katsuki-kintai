@@ -1,0 +1,8 @@
+{
+  "name": "香月農園 勤怠打刻",
+  "short_name": "勤怠打刻",
+  "display": "standalone",
+  "start_url": "./index.html",
+  "background_color": "#ffffff",
+  "theme_color": "#4285f4"
+}
