@@ -1,0 +1,11 @@
+{
+  "name": "香月農園 勤怠",
+  "short_name": "香月勤怠",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f2f4f7",
+  "theme_color": "#4285f4",
+  "lang": "ja",
+  "orientation": "portrait"
+}
