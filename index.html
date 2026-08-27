@@ -1,19 +1,1203 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <link rel="manifest" href="manifest.json">
-  <title>香月農園 勤怠打刻</title>
+    <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-title" content="香月農園 勤怠">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#4285f4">
+  <title>香月農園 勤怠</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <script src="./config.js"></script>
   <style>
-    body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-    iframe { width: 100%; height: 100%; border: none; }
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+    html,body{height:100%;}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Meiryo",sans-serif;
+         background:#f2f4f7;color:#2c3e50;-webkit-text-size-adjust:100%;
+         overscroll-behavior:none;touch-action:manipulation;}
+    .hidden{display:none!important;}
+
+    /* ===== ログイン ===== */
+    .login-wrap{max-width:360px;margin:0 auto;padding:calc(48px + env(safe-area-inset-top)) 20px 48px;}
+    .login-card{background:#fff;border:1px solid #e6e9ee;border-radius:16px;padding:24px;}
+    .login-title{font-size:20px;font-weight:bold;text-align:center;margin-bottom:4px;}
+    .login-lead{font-size:13px;color:#8a94a6;text-align:center;margin-bottom:20px;}
+    .field{margin-bottom:14px;}
+    .field label{display:block;font-size:13px;color:#5b6b7f;margin-bottom:6px;}
+    .field input{width:100%;padding:12px 14px;font-size:16px;border:1px solid #d6dbe3;border-radius:10px;}
+    .login-btn{width:100%;padding:14px;font-size:16px;font-weight:bold;color:#fff;background:#2c7be5;border:none;border-radius:10px;cursor:pointer;margin-top:6px;}
+    .login-btn:active{opacity:.8;}
+    .login-note{font-size:11px;color:#9aa6b8;text-align:center;margin-top:14px;}
+    #loginError{margin:8px 0 0;}
+
+    /* ===== ヘッダー ===== */
+    .header{background:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:center;justify-content:space-between;
+            border-bottom:1px solid #e6e9ee;position:sticky;top:0;z-index:10;}
+    .header .company{font-size:15px;font-weight:bold;}
+    .header .sub{font-size:11px;color:#8a94a6;}
+    .hclock{text-align:right;line-height:1.1;}
+    .hclock .d{font-size:12px;color:#8a94a6;}
+    .hclock .t{font-size:24px;font-weight:bold;}
+    .logout-btn{background:none;border:none;color:#8a94a6;font-size:12px;cursor:pointer;padding:4px 8px;}
+
+    /* ===== スタッフ一覧 ===== */
+    .wrap{max-width:720px;margin:0 auto;padding:14px;}
+    .lead{font-size:14px;color:#6b7688;margin:2px 0 12px;}
+    .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}
+    .staff-card{background:#fff;border:1px solid #e6e9ee;border-radius:14px;padding:14px 8px 10px;
+                text-align:center;cursor:pointer;will-change:transform;}
+    .staff-card:active{opacity:.75;transform:scale(.97);}
+    .avatar{width:56px;height:56px;border-radius:50%;margin:0 auto 7px;display:flex;align-items:center;
+            justify-content:center;font-size:22px;font-weight:bold;color:#fff;}
+    .av-on{background:#2ec27e;} .av-away{background:#f5a623;}
+    .av-off{background:#fff;color:#b7c0cf;border:2px solid #d7f0e2;}
+    .av-photo{padding:0;overflow:hidden;border:2px solid #2ec27e;}
+    .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+    .staff-name{font-size:14px;font-weight:600;}
+    .badge{display:inline-block;margin-top:5px;padding:2px 9px;border-radius:10px;font-size:11px;color:#fff;}
+    .b-on{background:#2ec27e;} .b-away{background:#f5a623;} .b-off{background:#9aa6b8;}
+    .empty{grid-column:1/-1;text-align:center;color:#9aa6b8;padding:30px;}
+
+    /* ===== 共通result ===== */
+    .result{text-align:center;padding:12px;border-radius:10px;font-weight:bold;margin-bottom:12px;font-size:16px;}
+    .queue{background:#fff4e5;color:#a3620a;}
+
+    /* ===== 未送信（オフライン）バッジ ===== */
+    .queue-badge{display:flex;align-items:center;gap:8px;background:#fff4e5;color:#a3620a;
+                border:1px solid #f5d9a8;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;}
+    .queue-badge .dot{width:8px;height:8px;border-radius:50%;background:#f5a623;flex-shrink:0;
+                      animation:pulse 1.4s ease-in-out infinite;}
+    @keyframes pulse{0%,100%{opacity:.4;}50%{opacity:1;}}
+    .pending-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;
+                 background:#fff4e5;color:#a3620a;font-size:10px;font-weight:bold;}
+    .ok{background:#d8f3e6;color:#137a4c;} .ng{background:#fde2e6;color:#a3283b;}
+    .info{background:#eaf2fd;color:#2c7be5;} /* 処理中の表示用 */
+
+    /* ===== 打刻今日の履歴 ===== */
+    .today-title{font-size:13px;color:#8a94a6;margin-bottom:6px;}
+    .today-item{display:flex;justify-content:space-between;align-items:center;padding:7px 0;
+                border-bottom:1px dashed #e6e9ee;font-size:14px;}
+    .today-item:last-child{border-bottom:none;}
+    .tbadge{padding:2px 8px;border-radius:6px;color:#fff;font-size:12px;}
+    .t-出勤{background:#f5a623;} .t-退勤{background:#5b6b7f;}
+    .t-外出{background:#fd7e14;} .t-戻り{background:#17a2b8;}
+
+    /* =====================================================
+       打刻画面（キオスク・スマホ共通レイアウト）
+    ===================================================== */
+    .punch-view{position:fixed;inset:0;background:#f2f4f7;overflow-y:auto;z-index:20;-webkit-overflow-scrolling:touch;}
+    .p-inner{max-width:500px;margin:0 auto;
+             padding:calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));}
+
+    .back-btn{display:block;width:100%;padding:14px;font-size:16px;font-weight:bold;
+              color:#2c7be5;background:#eaf2fd;border:2px solid #c5dcfa;border-radius:12px;
+              cursor:pointer;margin-bottom:16px;}
+    .back-btn:active{opacity:.8;}
+
+    .clock-panel{background:#fff;border:1px solid #e6e9ee;border-radius:12px;padding:16px;text-align:center;margin-bottom:12px;}
+    .clock-panel .d{font-size:14px;color:#8a94a6;margin-bottom:4px;}
+    .clock-panel .t{font-size:32px;font-weight:bold;line-height:1;}
+
+    .p-name-box{display:flex;align-items:center;justify-content:center;gap:12px;background:#fff;
+                border:1px solid #e6e9ee;border-radius:12px;padding:16px;margin-bottom:16px;}
+    .p-name-box .av{width:48px;height:48px;font-size:20px;flex-shrink:0;}
+    .p-name-box .nm{font-size:22px;font-weight:bold;}
+    /* ⑤ 名前枠アバターの auto余白を打ち消す（右ずれ修正） */
+    .p-name-box .avatar{margin:0;width:48px;height:48px;font-size:20px;flex-shrink:0;}
+
+    .p-btns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;}
+    .pbtn{padding:24px 8px;border:none;border-radius:14px;cursor:pointer;
+          font-size:20px;font-weight:bold;color:#fff;line-height:1.3;width:100%;}
+    .pbtn small{display:block;font-size:12px;font-weight:normal;opacity:.9;margin-top:4px;}
+    .pbtn:active{opacity:.8;transform:scale(.97);}
+    .pbtn:disabled{opacity:.35;cursor:not-allowed;transform:none!important;}
+    .p-in{background:#f5a623;} .p-out{background:#5b6b7f;}
+
+    /* ===== ブラウザ内インカメ撮影 ===== */
+    .camera-overlay{position:fixed;inset:0;z-index:1000;background:#111;display:flex;flex-direction:column;}
+    .camera-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#000;}
+    #cameraVideo{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+    .camera-footer{background:#111;padding:14px 16px calc(14px + env(safe-area-inset-bottom));}
+    .camera-guide{text-align:center;color:#fff;font-size:14px;margin-bottom:10px;}
+    .camera-actions{display:grid;grid-template-columns:1fr 2fr;gap:10px;}
+    .camera-cancel,.camera-shot{border:none;border-radius:14px;padding:16px 10px;font-size:17px;font-weight:bold;cursor:pointer;}
+    .camera-cancel{background:#343a40;color:#fff;}
+    .camera-shot{background:#2ec27e;color:#fff;}
+
+    /* ===== スタッフ用ナビ ===== */
+    .nav-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
+    .nav-btn{padding:10px 4px;font-size:13px;font-weight:bold;color:#2c7be5;background:#eaf2fd;
+             border:1px solid #c5dcfa;border-radius:10px;cursor:pointer;}
+    .nav-btn:active{opacity:.8;}
+
+    /* ===== マイページ 集計カード ===== */
+    .stat-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+    .stat-card{background:#fff;border:1px solid #e6e9ee;border-radius:12px;padding:14px;text-align:center;}
+    .stat-card .k{font-size:12px;color:#8a94a6;margin-bottom:4px;}
+    .stat-card .v{font-size:24px;font-weight:bold;line-height:1.1;}
+    .stat-card .u{font-size:12px;color:#8a94a6;}
+
+    .ym-bar{display:flex;align-items:center;justify-content:space-between;background:#fff;
+            border:1px solid #e6e9ee;border-radius:10px;padding:8px 12px;margin-bottom:12px;}
+    .ym-bar button{background:#eaf2fd;border:1px solid #c5dcfa;color:#2c7be5;border-radius:8px;
+                   padding:6px 12px;font-size:16px;font-weight:bold;cursor:pointer;}
+    .ym-bar .ym{font-size:16px;font-weight:bold;}
+
+    .leave-row{display:flex;justify-content:space-between;align-items:center;background:#fff;
+               border:1px solid #e6e9ee;border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+    .leave-row .kind{font-weight:bold;}
+    .leave-row .rem{font-size:20px;font-weight:bold;color:#137a4c;}
+    .leave-row .rem small{font-size:11px;color:#8a94a6;font-weight:normal;}
+
+    /* ===== 日別リスト ===== */
+    .cal-note{font-size:11px;color:#9aa6b8;margin:4px 0 10px;}
+    .day-list{background:#fff;border:1px solid #e6e9ee;border-radius:10px;overflow:hidden;}
+    .day-row{display:grid;grid-template-columns:1.6fr 1fr 1fr 1.1fr;gap:6px;padding:10px;
+             font-size:13px;border-bottom:1px solid #f0f2f5;align-items:center;cursor:pointer;}
+    .day-row:last-child{border-bottom:none;}
+    .day-row:active{background:#f2f6fc;}
+    .day-row.hd{color:#8a94a6;font-size:11px;background:#f7f9fc;cursor:default;font-weight:bold;}
+    .day-row.worked{background:#f6fcf9;}
+    .day-row .dcell{font-weight:bold;color:#5b6b7f;}
+    .day-row .dcell.sun{color:#e0556b;} .day-row .dcell.sat{color:#2c7be5;}
+    .day-row .dcell .wd{font-weight:normal;font-size:11px;color:#9aa6b8;margin-left:3px;}
+    .day-row .dcell .hol{display:block;font-weight:normal;font-size:10px;color:#e0556b;}
+
+    /* ===== 申請フォーム ===== */
+    .form-card{background:#fff;border:1px solid #e6e9ee;border-radius:12px;padding:16px;margin-bottom:14px;}
+    .form-card label{display:block;font-size:13px;color:#5b6b7f;margin:10px 0 4px;}
+    .form-card input,.form-card select,.form-card textarea{
+      width:100%;padding:10px 12px;font-size:16px;border:1px solid #d6dbe3;border-radius:10px;background:#fff;}
+    .form-card input:disabled{background:#f0f2f5;color:#aab2bf;}
+    .form-card textarea{min-height:70px;resize:vertical;}
+    .seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px;}
+    .seg button{padding:12px;border:1px solid #c5dcfa;border-radius:10px;background:#fff;color:#2c7be5;
+                font-weight:bold;cursor:pointer;}
+    .seg button.active{background:#2c7be5;color:#fff;border-color:#2c7be5;}
+    .submit-btn{width:100%;padding:14px;font-size:16px;font-weight:bold;color:#fff;background:#2ec27e;
+                border:none;border-radius:10px;cursor:pointer;margin-top:8px;}
+    .submit-btn:active{opacity:.8;}
+
+    /* ===== 申請一覧 ===== */
+    .req-item{background:#fff;border:1px solid #e6e9ee;border-radius:10px;padding:12px;margin-bottom:8px;}
+    .req-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+    .req-kind{font-weight:bold;}
+    .req-meta{font-size:13px;color:#5b6b7f;}
+    .req-status{padding:2px 10px;border-radius:10px;font-size:12px;color:#fff;}
+    .s-申請中{background:#9aa6b8;} .s-承認{background:#2ec27e;} .s-却下{background:#e0556b;} .s-取消{background:#c7ccd6;}
+    .cancel-btn{margin-top:8px;background:#fde2e6;color:#a3283b;border:none;border-radius:8px;padding:8px 12px;
+                font-size:13px;font-weight:bold;cursor:pointer;}
+
   </style>
 </head>
 <body>
-  <iframe src="https://script.google.com/a/macros/hubest.jp/s/AKfycbxkTf1XvJD0ss_z-vrdveSZQpzaqtvARsNwpyNGtzjuFLID0BEe-6ZwTRKItSHtYNXG/exec" allow="camera *; geolocation *"></iframe>
+
+<!-- ========== ログイン ========== -->
+<div id="loginView">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-title" id="loginCompany">勤怠打刻システム</div>
+      <div class="login-lead">アカウントIDとPINでログイン</div>
+      <div class="field">
+        <label for="accId">アカウントID</label>
+        <input type="text" id="accId" autocapitalize="off" autocomplete="username" placeholder="例：honten / taro">
+      </div>
+      <div class="field">
+        <label for="accPin">PIN（暗証番号）</label>
+        <input type="password" id="accPin" inputmode="numeric" autocomplete="current-password" placeholder="例：1234">
+      </div>
+      <div id="loginError" class="result ng hidden"></div>
+      <button class="login-btn" onclick="doLogin()">ログイン</button>
+      <div class="login-note">ログイン状態をこの端末に保存します。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== スタッフ一覧 ========== -->
+<div id="gridView" class="hidden">
+  <div class="header">
+    <div>
+      <div class="company" id="companyName">勤怠打刻システム</div>
+      <div class="sub" id="kioskName"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="hclock">
+        <div class="d" id="gridDate">----</div>
+        <div class="t" id="gridTime">--:--</div>
+      </div>
+      <button class="logout-btn" onclick="logout()">ログアウト</button>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="lead">打刻する人を選んでください</div>
+    <div class="grid" id="staffGrid"><div class="empty">読み込み中…</div></div>
+  </div>
+</div>
+
+<!-- ========== キオスク打刻画面 ========== -->
+<div id="kioskPunchView" class="punch-view hidden">
+  <div class="p-inner">
+    <button class="back-btn" onclick="backToGrid()">← 一覧へもどる</button>
+    <div class="clock-panel">
+      <div class="d" id="kpDate">----</div>
+      <div class="t" id="kpTime">--:--:--</div>
+    </div>
+    <div class="p-name-box">
+      <div class="avatar av-off" id="kpAvatar">？</div>
+      <div class="nm" id="kpName">―</div>
+    </div>
+
+    <div id="kioskQueueBadge" class="queue-badge hidden"></div>
+    <div id="kioskResult" class="result hidden"></div>
+
+    <div class="p-btns">
+      <button id="kpInBtn" class="pbtn p-in" onclick="kioskPunch('出勤')">出勤<small>インカメで撮影</small></button>
+      <button id="kpOutBtn" class="pbtn p-out" onclick="kioskPunch('退勤')">退勤<small>インカメで撮影</small></button>
+    </div>
+    <div class="today-title">本日の打刻状況</div>
+    <div id="kioskTodayList"><div style="color:#9aa6b8;font-size:13px;">まだ打刻はありません。</div></div>
+  </div>
+</div>
+
+<!-- ========== スマホ打刻画面 ========== -->
+<div id="mobilePunchView" class="punch-view hidden">
+  <div class="p-inner">
+    <button class="back-btn" onclick="logout()">↩ ログアウト</button>
+
+    <!-- スタッフ用ナビ -->
+    <div class="nav-row">
+      <button class="nav-btn" onclick="openMyPage()">📊 マイページ</button>
+      <button class="nav-btn" onclick="openRequestForm()">📝 申請する</button>
+      <button class="nav-btn" onclick="openRequestList()">📋 申請一覧</button>
+    </div>
+
+    <div class="clock-panel">
+      <div class="d" id="mpDate">----</div>
+      <div class="t" id="mpTime">--:--</div>
+    </div>
+    <div class="p-name-box">
+      <div class="avatar av-off" id="mpAvatar">？</div>
+      <div class="nm" id="mpName">―</div>
+    </div>
+
+    <div id="mobileQueueBadge" class="queue-badge hidden"></div>
+    <div id="mobileResult" class="result hidden"></div>
+
+    <div class="p-btns">
+      <button id="mpInBtn" class="pbtn p-in" onclick="mobilePunch('出勤')">出勤<small>インカメで撮影</small></button>
+      <button id="mpOutBtn" class="pbtn p-out" onclick="mobilePunch('退勤')">退勤<small>インカメで撮影</small></button>
+    </div>
+    <div class="today-title">本日の打刻状況</div>
+    <div id="mobileTodayList"><div style="color:#9aa6b8;font-size:13px;">まだ打刻はありません。</div></div>
+  </div>
+</div>
+
+<!-- ========== マイページ ========== -->
+<div id="myPageView" class="punch-view hidden">
+  <div class="p-inner">
+    <button class="back-btn" onclick="backToMobile()">← 打刻へもどる</button>
+    <div class="ym-bar">
+      <button onclick="shiftYm(-1)">‹</button>
+      <div class="ym" id="mpYm">----</div>
+      <button onclick="shiftYm(1)">›</button>
+    </div>
+    <div id="mpBody"><div style="color:#9aa6b8;padding:20px;text-align:center;">読み込み中…</div></div>
+  </div>
+</div>
+
+<!-- ========== 申請フォーム ========== -->
+<div id="requestFormView" class="punch-view hidden">
+  <div class="p-inner">
+    <button class="back-btn" id="reqBackBtn" onclick="backFromForm()">← 打刻へもどる</button>
+    <div class="seg">
+      <button id="segFix"   class="active" onclick="setReqKind('打刻修正')">打刻修正</button>
+      <button id="segLeave" onclick="setReqKind('休暇')">休日・休暇申請</button>
+    </div>
+
+    <div class="form-card">
+      <!-- 休暇用 -->
+      <div id="leaveFields" class="hidden">
+        <label>区分</label>
+        <select id="rfCategory">
+          <option value="有給">有給</option>
+          <option value="特別">特別休暇</option>
+          <option value="欠勤">欠勤</option>
+          <option value="その他">その他</option>
+        </select>
+        <label>取得単位</label>
+        <select id="rfUnit" onchange="toggleUnit()">
+          <option value="全日">全日</option>
+          <option value="午前">午前半休（0.5日）</option>
+          <option value="午後">午後半休（0.5日）</option>
+        </select>
+        <label>開始日</label>
+        <input type="date" id="rfStart">
+        <label>終了日（全日のみ・単日ならそのまま）</label>
+        <input type="date" id="rfEnd">
+      </div>
+
+      <!-- 打刻修正用 -->
+      <div id="fixFields">
+        <label>対象日</label>
+        <input type="date" id="rfDate">
+        <label>修正後の出勤</label>
+        <input type="time" id="rfIn">
+        <label>修正後の退勤</label>
+        <input type="time" id="rfOut">
+      </div>
+
+      <label>理由</label>
+      <textarea id="rfReason" placeholder="例：私用のため / 打刻し忘れ など"></textarea>
+    </div>
+
+    <div id="reqFormResult" class="result hidden"></div>
+    <button class="submit-btn" onclick="submitRequestUI()">この内容で申請する</button>
+  </div>
+</div>
+
+<!-- ========== 申請一覧 ========== -->
+<div id="requestListView" class="punch-view hidden">
+  <div class="p-inner">
+    <button class="back-btn" onclick="backToMobile()">← 打刻へもどる</button>
+    <div class="today-title" style="margin-bottom:10px;">あなたの申請</div>
+    <div id="reqListBody"><div style="color:#9aa6b8;padding:20px;text-align:center;">読み込み中…</div></div>
+  </div>
+</div>
+
+<!-- ブラウザ内インカメ：端末のカメラアプリを開かず、確認画面・ギャラリー保存なし -->
+<div id="cameraOverlay" class="camera-overlay hidden">
+  <div class="camera-stage">
+    <video id="cameraVideo" autoplay playsinline muted></video>
+  </div>
+  <div class="camera-footer">
+    <div class="camera-guide" id="cameraGuide">顔が画面中央に入るようにしてください</div>
+    <div class="camera-actions">
+      <button class="camera-cancel" onclick="cancelSelfieCamera()">キャンセル</button>
+      <button class="camera-shot" id="cameraShotBtn" onclick="captureSelfieAndPunch()">撮影して打刻</button>
+    </div>
+  </div>
+</div>
+<canvas id="canvas" class="hidden"></canvas>
+
+<!-- GAS通信専用。画面やカメラはGitHub Pages側で動作します -->
+<iframe id="gasBridge" title="GAS Bridge" aria-hidden="true" tabindex="-1" style="display:none"></iframe>
+
+<script>
+
+  /* =========================================================
+   * GitHub Pages -> GAS Bridge
+   * google.script.run 互換シム。既存UIロジックをほぼ変更せずGASを呼び出す。
+   * =======================================================*/
+  var GAS_BRIDGE_URL = (window.KINTAI_CONFIG && window.KINTAI_CONFIG.gasWebAppUrl) || '';
+  var gasBridgeFrame = document.getElementById('gasBridge');
+  var bridgeReady = false;
+  var bridgeSeq = 0;
+  var bridgePending = {};
+  var bridgeReadyWaiters = [];
+
+  function normalizeGasUrl_(url) {
+    return String(url || '').trim().replace(/\/$/, '');
+  }
+
+  function initGasBridge_() {
+    GAS_BRIDGE_URL = normalizeGasUrl_(GAS_BRIDGE_URL);
+    if (!GAS_BRIDGE_URL || GAS_BRIDGE_URL.indexOf('PASTE_') === 0) {
+      console.error('config.js の gasWebAppUrl を設定してください。');
+      return;
+    }
+    gasBridgeFrame.src = GAS_BRIDGE_URL + (GAS_BRIDGE_URL.indexOf('?') >= 0 ? '&' : '?') + 'bridge=1';
+    gasBridgeFrame.addEventListener('load', function(){
+      try { gasBridgeFrame.contentWindow.postMessage({ type:'kintai-bridge-ping' }, '*'); } catch(e) {}
+    });
+  }
+
+  window.addEventListener('message', function(ev) {
+    if (!gasBridgeFrame || ev.source !== gasBridgeFrame.contentWindow) return;
+    var msg = ev.data || {};
+    if (msg.type === 'kintai-bridge-ready') {
+      bridgeReady = true;
+      var ws = bridgeReadyWaiters.splice(0);
+      ws.forEach(function(w){ w.resolve(); });
+      return;
+    }
+    if (msg.type !== 'kintai-bridge-response' || !msg.id) return;
+    var p = bridgePending[msg.id];
+    if (!p) return;
+    delete bridgePending[msg.id];
+    clearTimeout(p.timer);
+    if (msg.ok) p.resolve(msg.result);
+    else p.reject(new Error(msg.error || 'GAS通信エラー'));
+  });
+
+  function waitBridgeReady_() {
+    if (bridgeReady) return Promise.resolve();
+    return new Promise(function(resolve, reject){
+      var timer = setTimeout(function(){
+        var i = bridgeReadyWaiters.findIndex(function(x){ return x.resolve === resolve; });
+        if (i >= 0) bridgeReadyWaiters.splice(i,1);
+        reject(new Error('GAS Bridgeに接続できません。config.js とGAS設定を確認してください。'));
+      }, 12000);
+      bridgeReadyWaiters.push({
+        resolve: function(){ clearTimeout(timer); resolve(); },
+        reject: reject
+      });
+      try { gasBridgeFrame.contentWindow.postMessage({ type:'kintai-bridge-ping' }, '*'); } catch(e) {}
+    });
+  }
+
+  function bridgeCall_(method, args) {
+    return waitBridgeReady_().then(function(){
+      return new Promise(function(resolve, reject){
+        var id = 'g' + Date.now() + '_' + (++bridgeSeq);
+        var timer = setTimeout(function(){
+          delete bridgePending[id];
+          reject(new Error('GAS応答タイムアウト'));
+        }, 20000);
+        bridgePending[id] = { resolve: resolve, reject: reject, timer: timer };
+        gasBridgeFrame.contentWindow.postMessage({
+          type: 'kintai-bridge-call',
+          id: id,
+          method: method,
+          args: args || []
+        }, '*');
+      });
+    });
+  }
+
+  function makeGasRunner_(successHandler, failureHandler) {
+    return new Proxy({}, {
+      get: function(target, prop) {
+        if (prop === 'withSuccessHandler') {
+          return function(fn){ return makeGasRunner_(fn, failureHandler); };
+        }
+        if (prop === 'withFailureHandler') {
+          return function(fn){ return makeGasRunner_(successHandler, fn); };
+        }
+        return function() {
+          var args = Array.prototype.slice.call(arguments);
+          bridgeCall_(String(prop), args)
+            .then(function(res){ if (typeof successHandler === 'function') successHandler(res); })
+            .catch(function(err){
+              if (typeof failureHandler === 'function') failureHandler(err);
+              else console.error(err);
+            });
+        };
+      }
+    });
+  }
+
+  window.google = window.google || {};
+  window.google.script = window.google.script || {};
+  Object.defineProperty(window.google.script, 'run', {
+    configurable: true,
+    get: function(){ return makeGasRunner_(null, null); }
+  });
+
+  initGasBridge_();
+
+  var STORAGE_KEY    = 'kintai_account_id';
+  var ACCOUNT_KEY    = 'kintai_account';
+  var currentAccount = null;
+  var appMode        = null;
+  var allStaff       = [];
+  var selected       = null;
+  var livePhotos     = {};
+  var lastPhoto      = null;
+  var cameraStream   = null;
+  var cameraPunchType = null;
+  var cameraResultId  = null;
+  var cameraPressedAt = null;
+  var currentYm      = null;
+  var reqKind        = '打刻修正';
+
+  /* ===== オフライン打刻キュー ===== */
+  var QUEUE_KEY   = 'kintai_offline_queue';
+  var SEND_TIMEOUT_MS = 8000;  // これを超えて応答が無ければ「圏外」とみなし保存
+  var isFlushing  = false;
+
+  /* ⑥ 解析時点で（保存済みなら）ログイン画面を隠す＝ちらつき防止 */
+  (function(){ try { if (localStorage.getItem(ACCOUNT_KEY)) { var lv = document.getElementById('loginView'); if (lv) lv.classList.add('hidden'); } } catch(e){} })();
+
+  window.addEventListener('load', function() {
+    startClock();
+    setInterval(refreshKioskGrid, 30000);
+
+    // ===== オフライン打刻の自動再送 =====
+    renderQueueBadges();
+    flushOfflineQueue();                                   // 起動時に一度試す
+    window.addEventListener('online', flushOfflineQueue);  // 電波復帰の合図で即トライ
+    setInterval(flushOfflineQueue, 20000);                 // 合図が来ない端末向けの保険（20秒毎）
+
+
+    /* ⑥ 楽観的ログイン：保存済みなら即・該当画面へ。正当性は裏で確認 */
+    var acc = safeGetJSON(ACCOUNT_KEY);
+    if (acc && acc.id) {
+      routeByAccount(acc);
+      google.script.run
+        .withSuccessHandler(function(res){
+          if (res && res.success) { currentAccount = res.account; safeSetJSON(ACCOUNT_KEY, res.account); }
+          else { safeRemove(ACCOUNT_KEY); safeRemove(STORAGE_KEY); showLogin(); }
+        })
+        .withFailureHandler(function(){ /* オフライン等は楽観表示のまま */ })
+        .resumeAccount(acc.id);
+    } else {
+      showLogin();
+    }
+  });
+
+  function doLogin() {
+    var id  = (document.getElementById('accId').value  || '').trim();
+    var pin = (document.getElementById('accPin').value || '').trim();
+    hide('loginError');
+    if (!id || !pin) { showLoginError('IDとPINを入力してください。'); return; }
+    google.script.run.withSuccessHandler(function(res) {
+      if (res.success) { safeSet(STORAGE_KEY, res.account.id); safeSetJSON(ACCOUNT_KEY, res.account); routeByAccount(res.account); }
+      else showLoginError(res.message);
+    }).withFailureHandler(function(e) { showLoginError('通信エラー'); }).login(id, pin);
+  }
+
+  function showLogin() {
+    currentAccount = null; appMode = null; showOnly('loginView');
+    google.script.run.withSuccessHandler(function(d) { if (d && d.companyName) setText('loginCompany', d.companyName); }).withFailureHandler(function(){}).getKioskData();
+  }
+
+  function logout() {
+    safeRemove(ACCOUNT_KEY); safeRemove(STORAGE_KEY);
+    document.getElementById('accId').value = ''; document.getElementById('accPin').value = '';
+    showLogin();
+  }
+  function routeByAccount(account) { currentAccount = account; if (account.type === '拠点') enterKiosk(); else enterMobile(account.staffId); }
+
+  /* --- キオスク --- */
+  function enterKiosk() {
+    appMode = 'kiosk'; showOnly('gridView');
+    setText('kioskName', '拠点：' + currentAccount.displayName);
+    google.script.run.withSuccessHandler(function(d) {
+      setText('companyName', d.companyName); document.title = d.companyName;
+      allStaff = d.staffList || []; renderGrid();
+    }).withFailureHandler(function(){}).getKioskData();
+  }
+
+  function renderGrid() {
+    var grid = document.getElementById('staffGrid'); grid.innerHTML = '';
+    if (!allStaff || !allStaff.length) { grid.innerHTML = '<div class="empty">スタッフがいません。</div>'; return; }
+    allStaff.forEach(function(s) {
+      var card = document.createElement('div'); card.className = 'staff-card';
+      card.innerHTML = avatarHtml(s) + '<div class="staff-name">' + escapeHtml(s.name) + '</div><span class="badge ' + badgeClass(s.status) + '">' + s.status + '</span>';
+      card.onclick = function() { openKioskPunch(s); }; grid.appendChild(card);
+    });
+  }
+
+  function refreshKioskGrid() {
+    if (appMode !== 'kiosk' || !isVisible('gridView')) return;
+    google.script.run.withSuccessHandler(function(d) { allStaff = d.staffList || []; renderGrid(); }).withFailureHandler(function(){}).getKioskData();
+  }
+
+  function openKioskPunch(staff) {
+    selected = { id: staff.id, name: staff.name }; setText('kpName', staff.name);
+    var av = document.getElementById('kpAvatar'); av.className = 'avatar ' + avClass(staff.status); av.innerHTML = avatarInner(staff);
+    hide('kioskResult'); showOnly('kioskPunchView'); window.scrollTo(0, 0); loadTodayStatus(staff.id, 'kioskTodayList');
+  }
+
+  function backToGrid() {
+    hide('kioskPunchView'); show('gridView'); selected = null;
+    google.script.run.withSuccessHandler(function(d) { allStaff = d.staffList || []; renderGrid(); }).withFailureHandler(function(){}).getKioskData();
+  }
+
+  function kioskPunch(type) {
+    hide('kioskResult'); lastPhoto = null;
+    startSelfieCamera(type, 'kioskResult');
+  }
+
+  /* --- スマホ --- */
+  function enterMobile(staffId) {
+    appMode = 'staff'; showOnly('mobilePunchView');
+    // ② サーバー応答を待たず、まず名前を即表示
+    if (currentAccount && currentAccount.displayName) { selected = { id: staffId, name: currentAccount.displayName }; setText('mpName', currentAccount.displayName); }
+    google.script.run.withSuccessHandler(function(d) {
+      document.title = d.companyName; if (!d.staff) { showLogin(); return; }
+      selected = { id: d.staff.id, name: d.staff.name };
+      var av = document.getElementById('mpAvatar'); av.className = 'avatar ' + avClass(d.staff.status); av.innerHTML = avatarInner(d.staff);
+      setText('mpName', d.staff.name); hide('mobileResult'); renderTodayList(d.today, 'mobileTodayList');
+      applyPunchButtonState(d.staff.id, d.today, 'mobileTodayList');
+    }).withFailureHandler(function(){}).getStaffData(staffId);
+  }
+
+  function mobilePunch(type) {
+    hide('mobileResult'); lastPhoto = null;
+    startSelfieCamera(type, 'mobileResult');
+  }
+
+  /* ===== ブラウザ内インカメ ===== */
+  function startSelfieCamera(type, resultId) {
+    if (!selected || !currentAccount) return;
+    cameraPunchType = type;
+    cameraResultId = resultId;
+    cameraPressedAt = new Date(); // 出勤/退勤ボタンを押した瞬間を打刻時刻として保持
+    setPunchButtonsBusy(true);
+
+    var media = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    if (!media) {
+      cameraPressedAt = null;
+      setPunchButtonsBusy(false);
+      showResultEl(resultId, 'このブラウザではブラウザ内カメラを利用できません。Chrome / Safari で開いてください。', false);
+      return;
+    }
+
+    document.getElementById('cameraGuide').textContent = selected.name + ' さん / ' + type + '　顔を画面中央に入れてください';
+    document.getElementById('cameraShotBtn').disabled = true;
+    show('cameraOverlay');
+
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'user' },
+        width: { ideal: 720 },
+        height: { ideal: 960 }
+      },
+      audio: false
+    }).then(function(stream) {
+      cameraStream = stream;
+      var video = document.getElementById('cameraVideo');
+      video.srcObject = stream;
+      video.onloadedmetadata = function() {
+        video.play().catch(function(){});
+        document.getElementById('cameraShotBtn').disabled = false;
+      };
+    }).catch(function(err) {
+      stopSelfieCamera();
+      cameraPressedAt = null;
+      showResultEl(resultId, 'インカメを起動できませんでした。カメラ権限を許可してから再度お試しください。', false);
+      loadTodayStatus(selected.id, appMode === 'kiosk' ? 'kioskTodayList' : 'mobileTodayList');
+    });
+  }
+
+  function captureSelfieAndPunch() {
+    if (!cameraStream || !cameraPunchType || !cameraResultId) return;
+    var btn = document.getElementById('cameraShotBtn');
+    btn.disabled = true;
+
+    var video = document.getElementById('cameraVideo');
+    var canvas = document.getElementById('canvas');
+    var srcW = video.videoWidth || 720;
+    var srcH = video.videoHeight || 960;
+    var maxSide = 720;
+    var scale = Math.min(1, maxSide / Math.max(srcW, srcH));
+    canvas.width = Math.round(srcW * scale);
+    canvas.height = Math.round(srcH * scale);
+    var ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    lastPhoto = canvas.toDataURL('image/jpeg', 0.72);
+
+    var type = cameraPunchType;
+    var resultId = cameraResultId;
+    stopSelfieCamera();
+    showResultInfo(resultId, '📍 打刻処理中...');
+    doPunch(type, true, resultId);
+  }
+
+  function cancelSelfieCamera() {
+    var resultId = cameraResultId;
+    stopSelfieCamera();
+    lastPhoto = null;
+    cameraPressedAt = null;
+    if (selected) loadTodayStatus(selected.id, appMode === 'kiosk' ? 'kioskTodayList' : 'mobileTodayList');
+    if (resultId) hide(resultId);
+  }
+
+  function stopSelfieCamera() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} });
+    }
+    cameraStream = null;
+    cameraPunchType = null;
+    cameraResultId = null;
+    var video = document.getElementById('cameraVideo');
+    if (video) video.srcObject = null;
+    hide('cameraOverlay');
+  }
+
+  /* --- 打刻送信（共通） --- */
+  function doPunch(type, hasPhoto, resultId) {
+    if (!selected || !currentAccount) return;
+
+    // ★押した瞬間の時刻をこの端末で確保しておく（後から送信が遅れても打刻時刻がズレない）
+    var pressedAt = cameraPressedAt || new Date();
+    cameraPressedAt = null;
+    var clientDateStr = pressedAt.getFullYear() + '/' + pad(pressedAt.getMonth()+1) + '/' + pad(pressedAt.getDate());
+    var clientTimeStr = pad(pressedAt.getHours()) + ':' + pad(pressedAt.getMinutes()) + ':' + pad(pressedAt.getSeconds());
+    var clientHHMM    = pad(pressedAt.getHours()) + ':' + pad(pressedAt.getMinutes());
+    var clientPunchId = 'p' + pressedAt.getTime() + '_' + Math.random().toString(36).slice(2, 8);
+
+    var payload = { accountId: currentAccount.id, staffId: selected.id, staffName: selected.name, type: type, hasPhoto: hasPhoto, device: navigator.userAgent, location: '',
+                    clientPunchId: clientPunchId, clientDateStr: clientDateStr, clientTimeStr: clientTimeStr, clientHHMM: clientHHMM };
+
+    if (selected.id === 'S000') {
+      payload.location = 'GPS不要（S000）';
+      showResultInfo(resultId, '📡 データを送信中...');
+      sendPunch(payload, type, resultId);
+      return;
+    }
+
+    var geoDone = false;
+    // ★GPSの応答自体が来ない端末があるための保険（最長6秒で強制的に先へ進む）
+    var geoFallback = setTimeout(function(){
+      if (geoDone) return; geoDone = true;
+      payload.location = '取得タイムアウト';
+      showResultInfo(resultId, '📡 データを送信中...');
+      sendPunch(payload, type, resultId);
+    }, 3500);
+
+    if (navigator.geolocation) {
+      showResultInfo(resultId, '📍 位置情報を取得中...');
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          if (geoDone) return; geoDone = true; clearTimeout(geoFallback);
+          payload.location = 'https://www.google.com/maps?q=' + pos.coords.latitude + ',' + pos.coords.longitude;
+          showResultInfo(resultId, '📡 データを送信中...');
+          sendPunch(payload, type, resultId);
+        },
+        function(err) {
+          if (geoDone) return; geoDone = true; clearTimeout(geoFallback);
+          // ★位置情報の失敗は打刻を止める理由にしない。「取得できなかった」とだけ記録して先へ進む
+          payload.location = '取得エラー';
+          showResultInfo(resultId, '📡 データを送信中...');
+          sendPunch(payload, type, resultId);
+        },
+        { enableHighAccuracy: true, timeout: 3000, maximumAge: 30000 }
+      );
+    } else {
+      clearTimeout(geoFallback);
+      payload.location = 'GPS非対応';
+      showResultInfo(resultId, '📡 データを送信中...');
+      sendPunch(payload, type, resultId);
+    }
+  }
+
+  function sendPunch(payload, type, resultId) {
+    var settled = false;
+    // ★応答が一定時間無ければ「電波が悪い」とみなし、ローカル保存へ切り替える
+    var timer = setTimeout(function() {
+      if (settled) return; settled = true;
+      queuePunch(payload, resultId);
+    }, SEND_TIMEOUT_MS);
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        if (settled) return; settled = true; clearTimeout(timer);
+        onPunchResult(res, type, resultId);
+      })
+      .withFailureHandler(function(err) {
+        if (settled) return; settled = true; clearTimeout(timer);
+        // ★通信エラー（圏外・回線切断など）→ 諦めずローカルに一時保存
+        queuePunch(payload, resultId);
+      })
+      .recordPunch(payload);
+  }
+
+  /* ===== オフライン保存＆自動再送 ===== */
+  function loadQueue() { return safeGetJSON(QUEUE_KEY) || []; }
+  // 容量オーバー等を検知したいので、safeSetJSONとは別に例外を外へ伝える保存関数を使う
+  function saveQueueList(q) { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); }
+
+  function queuePunch(payload, resultId) {
+    // 写真は「保存する瞬間」だけ同梱する（通常送信では乗せず通信量を節約）
+    if (payload.hasPhoto && lastPhoto) payload.photoDataUrl = lastPhoto;
+
+    var q = loadQueue();
+    q.push(payload);
+    try {
+      saveQueueList(q);
+    } catch (e) {
+      // 端末の保存容量オーバー等 → 写真を諦めて打刻だけは残す
+      delete payload.photoDataUrl;
+      q[q.length - 1] = payload;
+      try { saveQueueList(q); } catch (e2) { /* それでもダメなら諦める */ }
+    }
+
+    showResultEl(resultId, '📶 通信できなかったため端末に一時保存しました。電波が戻り次第、自動で送信します。', true);
+    renderQueueBadges();
+
+    lastPhoto = null;
+    myPageCache = {};
+    // キオスクは一覧へ、スマホはそのまま留まる（見た目は通常の打刻と同じ流れ）
+    if (appMode === 'kiosk') { setTimeout(backToGrid, 1400); }
+    else { loadTodayStatus(selected.id, 'mobileTodayList'); }
+  }
+
+  function queueCountFor(staffId) {
+    return loadQueue().filter(function(x){ return String(x.staffId) === String(staffId); }).length;
+  }
+
+  function renderQueueBadges() {
+    var total = loadQueue().length;
+    ['kioskQueueBadge', 'mobileQueueBadge'].forEach(function(id){
+      var el = document.getElementById(id); if (!el) return;
+      if (!total) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+      el.classList.remove('hidden');
+      el.innerHTML = '<span class="dot"></span><span>未送信の打刻が ' + total + ' 件あります。電波が戻り次第、自動で送信します。</span>';
+    });
+  }
+
+  function flushOfflineQueue() {
+    if (isFlushing) return;
+    var q = loadQueue();
+    if (!q.length) { renderQueueBadges(); return; }
+    isFlushing = true;
+    var item = q[0];
+
+    google.script.run
+      .withSuccessHandler(function(res) {
+        var q2 = loadQueue().filter(function(x){ return x.clientPunchId !== item.clientPunchId; });
+        saveQueueList(q2);
+        isFlushing = false;
+        renderQueueBadges();
+        myPageCache = {};
+
+        // オフライン時に一時保持していた写真をDriveへ送る
+        if ((item.type === '出勤' || item.type === '退勤') && item.photoDataUrl && res && res.success) {
+          google.script.run
+            .withSuccessHandler(function(){})
+            .withFailureHandler(function(){})
+            .savePunchPhoto({ staffId: item.staffId, staffName: item.staffName, type: item.type,
+                              time: res.time || item.clientTimeStr || '', recordId: res.recordId || '', photoDataUrl: item.photoDataUrl });
+        }
+
+        // 今開いている画面のリアルタイム表示があれば更新
+        if (selected && String(selected.id) === String(item.staffId)) {
+          loadTodayStatus(selected.id, appMode === 'kiosk' ? 'kioskTodayList' : 'mobileTodayList');
+        }
+        flushOfflineQueue(); // 続けて次の未送信分も送る
+      })
+      .withFailureHandler(function() {
+        isFlushing = false; // まだ繋がらない。次のタイミングで再挑戦
+      })
+      .recordPunch(item);
+  }
+
+  function onPunchResult(res, type, resultId) {
+    if (!res.success) {
+      showResultEl(resultId, '✗ ' + res.message, false);
+      lastPhoto = null;
+      if (selected) loadTodayStatus(selected.id, appMode === 'kiosk' ? 'kioskTodayList' : 'mobileTodayList');
+      return;
+    }
+    var sid = selected.id;
+
+    // 打刻本体の成功を先に確定。写真保存は裏で実行して画面遷移を待たせない。
+    if (lastPhoto) {
+      var photoToSend = lastPhoto;
+      google.script.run
+        .withFailureHandler(function(){})
+        .savePunchPhoto({ staffId: sid, staffName: selected.name, type: type,
+                          time: res.time || '', recordId: res.recordId || '', photoDataUrl: photoToSend });
+    }
+
+    hide(resultId);
+    lastPhoto = null;
+    myPageCache = {};
+    if (appMode === 'kiosk') backToGrid();
+    else loadTodayStatus(sid, 'mobileTodayList');
+  }
+
+  /* --- 共通部品 --- */
+  function loadTodayStatus(staffId, listId) {
+    google.script.run.withSuccessHandler(function(list) {
+      renderTodayList(list, listId);
+      applyPunchButtonState(staffId, list, listId);
+    }).withFailureHandler(function(){}).getTodayStatus(staffId);
+  }
+
+  function renderTodayList(list, listId) {
+    var box = document.getElementById(listId);
+    if (!list || !list.length) {
+      box.innerHTML = '<div style="color:#9aa6b8;font-size:13px;">まだ打刻はありません。</div>';
+      return;
+    }
+    box.innerHTML = '';
+    list.forEach(function(item) {
+      var row = document.createElement('div'); row.className = 'today-item';
+      row.innerHTML = '<span class="tbadge t-' + item.type + '">' + item.type + '</span><span>' + item.time + '</span>';
+      box.appendChild(row);
+    });
+  }
+
+  function setPunchButtonsBusy(busy) {
+    ['kpInBtn','kpOutBtn','mpInBtn','mpOutBtn'].forEach(function(id){
+      var b = document.getElementById(id);
+      if (b && ((appMode === 'kiosk' && id.indexOf('kp') === 0) || (appMode === 'staff' && id.indexOf('mp') === 0))) b.disabled = !!busy;
+    });
+  }
+
+  function applyPunchButtonState(staffId, list, listId) {
+    var hasIn = false, hasOut = false;
+    (list || []).forEach(function(x){ if (x.type === '出勤') hasIn = true; if (x.type === '退勤') hasOut = true; });
+
+    // 通信待ちの未送信打刻も状態に含め、オフライン時の連打を防ぐ
+    var now = new Date();
+    var today = now.getFullYear() + '/' + pad(now.getMonth()+1) + '/' + pad(now.getDate());
+    loadQueue().forEach(function(x){
+      if (String(x.staffId) !== String(staffId) || x.clientDateStr !== today) return;
+      if (x.type === '出勤') hasIn = true;
+      if (x.type === '退勤') hasOut = true;
+    });
+
+    var inBtn = document.getElementById(listId === 'kioskTodayList' ? 'kpInBtn' : 'mpInBtn');
+    var outBtn = document.getElementById(listId === 'kioskTodayList' ? 'kpOutBtn' : 'mpOutBtn');
+    if (!inBtn || !outBtn) return;
+
+    if (!hasIn) {
+      inBtn.disabled = false;
+      outBtn.disabled = true;
+    } else if (!hasOut) {
+      inBtn.disabled = true;
+      outBtn.disabled = false;
+    } else {
+      inBtn.disabled = true;
+      outBtn.disabled = true;
+    }
+  }
+
+  function startClock() { tick(); setInterval(tick, 1000); }
+  function tick() {
+    var now = new Date(), week = ['日','月','火','水','木','金','土'], d = now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日(' + week[now.getDay()] + ')';
+    var h = pad(now.getHours()), m = pad(now.getMinutes()), s = pad(now.getSeconds());
+    setText('gridDate', d); setText('gridTime', h + ':' + m); setText('kpDate', d); setText('kpTime', h + ':' + m + ':' + s); setText('mpDate', d); setText('mpTime', h + ':' + m + ':' + s);
+  }
+  function avatarInner(s) { return initialOf(s.name); }
+  function avatarHtml(s) { return '<div class="avatar ' + avClass(s.status) + '">' + initialOf(s.name) + '</div>'; }
+  function avClass(st) { return st==='勤務中'?'av-on':'av-off'; }
+  function badgeClass(st) { return st==='勤務中'?'b-on':'b-off'; }
+  function initialOf(n) { return String(n||'').trim().charAt(0) || '？'; }
+  function pad(n) { return n < 10 ? '0'+n : ''+n; }
+  function setText(id, v) { var el=document.getElementById(id); if(el) el.textContent=v; }
+  function show(id) { document.getElementById(id).classList.remove('hidden'); }
+  function hide(id) { document.getElementById(id).classList.add('hidden'); }
+  function isVisible(id) { return !document.getElementById(id).classList.contains('hidden'); }
+  function showOnly(id) { ['loginView','gridView','kioskPunchView','mobilePunchView','myPageView','requestFormView','requestListView'].forEach(function(v){ hide(v); }); show(id); }
+
+  /* 状態表示用（青色）と完了・エラー表示用（緑・赤） */
+  function showResultInfo(id, t) { var el = document.getElementById(id); if (!el) return; el.textContent = t; el.className = 'result info'; el.classList.remove('hidden'); }
+  function showResultEl(id, t, ok) { var el = document.getElementById(id); if (!el) return; el.textContent = t; el.className = 'result ' + (ok ? 'ok' : 'ng'); el.classList.remove('hidden'); }
+
+  function showLoginError(t) { var el = document.getElementById('loginError'); el.textContent = t; el.classList.remove('hidden'); }
+  function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function safeGet(k) { try { return localStorage.getItem(k); } catch(e) { return null; } }
+  function safeSet(k, v) { try { localStorage.setItem(k, v); } catch(e) {} }
+  function safeRemove(k) { try { localStorage.removeItem(k); } catch(e) {} }
+  function safeGetJSON(k){ try { var s = localStorage.getItem(k); return s ? JSON.parse(s) : null; } catch(e){ return null; } }
+  function safeSetJSON(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+
+  /* =========================================================
+   * マイページ / 申請（スタッフ用）
+   * =======================================================*/
+  var reqFormFrom = 'mobile';   // ① 申請フォームをどこから開いたか
+  var myPageCache = {};         // ② マイページのキャッシュ（ym → data）
+
+  function ymNow() { var n = new Date(); return n.getFullYear() + '-' + pad(n.getMonth() + 1); }
+  function backToMobile() { if (currentAccount) enterMobile(currentAccount.staffId); else showLogin(); }
+  function backFromForm() { if (reqFormFrom === 'myPage') openMyPage(); else backToMobile(); }
+
+  /* ③ 日本の祝日を計算（1980〜2099／ハッピーマンデー・春分秋分・振替・国民の休日に対応） */
+  function jpHolidaysMap(year) {
+    var list = [];
+    function add(m, d, name) { list.push({ m:m, d:d, name:name }); }
+    add(1,1,'元日'); add(2,11,'建国記念の日'); add(2,23,'天皇誕生日');
+    add(4,29,'昭和の日'); add(5,3,'憲法記念日'); add(5,4,'みどりの日'); add(5,5,'こどもの日');
+    add(8,11,'山の日'); add(11,3,'文化の日'); add(11,23,'勤労感謝の日');
+    function nthMon(m, n) { var f = new Date(year, m-1, 1).getDay(); return 1 + ((8 - f) % 7) + (n-1)*7; }
+    add(1, nthMon(1,2), '成人の日'); add(7, nthMon(7,3), '海の日');
+    add(9, nthMon(9,3), '敬老の日'); add(10, nthMon(10,2), 'スポーツの日');
+    add(3, Math.floor(20.8431 + 0.242194*(year-1980) - Math.floor((year-1980)/4)), '春分の日');
+    add(9, Math.floor(23.2488 + 0.242194*(year-1980) - Math.floor((year-1980)/4)), '秋分の日');
+    var map = {}; list.forEach(function(h){ map[h.m*100 + h.d] = h.name; });
+    function isHol(dt){ return Object.prototype.hasOwnProperty.call(map, (dt.getMonth()+1)*100 + dt.getDate()); }
+    // 振替休日
+    list.slice().forEach(function(h){
+      var dt = new Date(year, h.m-1, h.d);
+      if (dt.getDay() === 0) { var n = new Date(dt); do { n.setDate(n.getDate()+1); } while (isHol(n)); map[(n.getMonth()+1)*100 + n.getDate()] = '振替休日'; }
+    });
+    // 国民の休日（祝日に挟まれた平日）
+    for (var mo=1; mo<=12; mo++) {
+      var dimm = new Date(year, mo, 0).getDate();
+      for (var dd=1; dd<=dimm; dd++) {
+        var cur = new Date(year, mo-1, dd);
+        if (cur.getDay() === 0) continue;
+        var key = mo*100 + dd; if (map.hasOwnProperty(key)) continue;
+        if (isHol(new Date(year, mo-1, dd-1)) && isHol(new Date(year, mo-1, dd+1))) map[key] = '国民の休日';
+      }
+    }
+    return map;
+  }
+
+  /* --- マイページ --- */
+  function openMyPage() { currentYm = currentYm || ymNow(); showOnly('myPageView'); window.scrollTo(0,0); loadMyPage(); }
+  function shiftYm(delta) {
+    var p = currentYm.split('-'); var d = new Date(parseInt(p[0],10), parseInt(p[1],10) - 1 + delta, 1);
+    currentYm = d.getFullYear() + '-' + pad(d.getMonth() + 1); loadMyPage();
+  }
+  function loadMyPage() {
+    setText('mpYm', currentYm.replace('-', '年') + '月');
+    var cached = myPageCache[currentYm];
+    if (cached) { renderMyPage(cached); }   // ② キャッシュがあれば即表示（スピナー無し）
+    else { document.getElementById('mpBody').innerHTML = '<div style="color:#9aa6b8;padding:20px;text-align:center;">読み込み中…</div>'; }
+    google.script.run
+      .withSuccessHandler(function(d){ myPageCache[currentYm] = d; renderMyPage(d); })
+      .withFailureHandler(function(){ if (!cached) document.getElementById('mpBody').innerHTML = '<div class="result ng">読み込みに失敗しました</div>'; })
+      .getMyPageData(currentAccount.staffId, currentYm);
+  }
+  function hhmmDisp(min) { if (min == null) return '—'; var h = Math.floor(min / 60), m = min % 60; return h + '時間' + (m ? pad(m) + '分' : '00分'); }
+
+  function renderMyPage(d) {
+    var s = d.stats || { 出勤日数:0, 勤務分:0, days:[] };
+    var html = '';
+
+    html += '<div class="stat-cards">';
+    html += '<div class="stat-card"><div class="k">出勤日数</div><div class="v">' + (s.出勤日数||0) + '</div><div class="u">日</div></div>';
+    html += '<div class="stat-card"><div class="k">勤務時間</div><div class="v">' + Math.floor((s.勤務分||0)/60) + '<small style="font-size:14px;">:' + pad((s.勤務分||0)%60) + '</small></div><div class="u">時間:分</div></div>';
+    html += '</div>';
+
+    html += '<div class="today-title">休暇残</div>';
+    var bal = d.balance || [];
+    if (!bal.length) { html += '<div style="color:#9aa6b8;font-size:13px;margin-bottom:12px;">「休暇付与」シートに付与を入力すると表示されます。</div>'; }
+    else { bal.forEach(function(b){
+      html += '<div class="leave-row"><div class="kind">' + escapeHtml(b.kind) + '</div>'
+            + '<div class="rem">' + b.remain + '<small> 日</small>'
+            + (b.pending ? ' <small style="color:#f5a623;">(申請中 ' + b.pending + ')</small>' : '') + '</div></div>';
+    }); }
+
+    // 日別リスト（その月の全日を表示・タップで打刻修正）
+    var ymp = currentYm.split('-'); var yy = parseInt(ymp[0],10), mm = parseInt(ymp[1],10);
+    var dim = new Date(yy, mm, 0).getDate();        // 月末日
+    var wk = ['日','月','火','水','木','金','土'];
+    var hol = jpHolidaysMap(yy);                    // ③ 祝日マップ
+    var map = {};
+    (s.days||[]).forEach(function(x){ map[parseInt(x.date.slice(8,10),10)] = x; });
+
+    html += '<div class="today-title" style="margin-top:14px;">日別</div>';
+    html += '<div class="cal-note">日付をタップすると、その日の打刻修正を申請できます。</div>';
+    html += '<div class="day-list">';
+    html += '<div class="day-row hd"><div>日付</div><div>出勤</div><div>退勤</div><div>勤務</div></div>';
+    for (var dnum=1; dnum<=dim; dnum++) {
+      var wd = new Date(yy, mm-1, dnum).getDay();
+      var holName = hol[mm*100 + dnum] || '';
+      var dc = (wd===0 || holName) ? 'sun' : (wd===6 ? 'sat' : '');  // ③ 祝日は日曜と同じ赤
+      var rec = map[dnum];
+      var inT = rec ? (rec.inT||'') : '', outT = rec ? (rec.outT||'') : '';
+      var workTxt = (rec && rec.work!=null) ? (Math.floor(rec.work/60) + ':' + pad(rec.work%60)) : '—';
+      var dateStr = yy + '/' + pad(mm) + '/' + pad(dnum);
+      html += '<div class="day-row' + (inT?' worked':'') + '" onclick="openFixFor(\'' + dateStr + '\',\'' + inT + '\',\'' + outT + '\')">'
+            + '<div class="dcell ' + dc + '">' + mm + '/' + dnum + '<span class="wd">(' + wk[wd] + ')</span>'
+            + (holName ? '<span class="hol">' + escapeHtml(holName) + '</span>' : '') + '</div>'
+            + '<div>' + (inT||'—') + '</div>'
+            + '<div>' + (outT||'—') + '</div>'
+            + '<div>' + workTxt + '</div>'
+            + '</div>';
+    }
+    html += '</div>';
+    document.getElementById('mpBody').innerHTML = html;
+  }
+
+  /* --- 申請フォーム --- */
+  function openRequestForm() {
+    reqFormFrom = 'mobile'; setText('reqBackBtn', '← 打刻へもどる');
+    reqKind = '打刻修正'; setReqKind('打刻修正');
+    document.getElementById('rfStart').value = ''; document.getElementById('rfEnd').value = '';
+    document.getElementById('rfDate').value = '';  document.getElementById('rfIn').value = ''; document.getElementById('rfOut').value = '';
+    document.getElementById('rfReason').value = '';
+    if (document.getElementById('rfUnit')) { document.getElementById('rfUnit').value = '全日'; toggleUnit(); }
+    hide('reqFormResult'); showOnly('requestFormView'); window.scrollTo(0,0);
+  }
+  function setReqKind(k) {
+    reqKind = k;
+    document.getElementById('segLeave').classList.toggle('active', k === '休暇');
+    document.getElementById('segFix').classList.toggle('active', k === '打刻修正');
+    document.getElementById('leaveFields').classList.toggle('hidden', k !== '休暇');
+    document.getElementById('fixFields').classList.toggle('hidden', k !== '打刻修正');
+  }
+  function toggleUnit() {
+    var half = val('rfUnit') !== '全日';
+    var e = document.getElementById('rfEnd');
+    if (e) { e.disabled = half; if (half) e.value = ''; }
+  }
+  function openFixFor(dateStr, inT, outT) {
+    reqFormFrom = 'myPage'; setText('reqBackBtn', '← マイページへもどる');
+    reqKind = '打刻修正'; setReqKind('打刻修正');
+    document.getElementById('rfDate').value = dateStr.replace(/\//g, '-');
+    document.getElementById('rfIn').value  = inT  || '';
+    document.getElementById('rfOut').value = outT || '';
+    document.getElementById('rfReason').value = '';
+    hide('reqFormResult'); showOnly('requestFormView'); window.scrollTo(0,0);
+  }
+  function val(id) { var el = document.getElementById(id); return el ? (el.value || '').trim() : ''; }
+
+  function submitRequestUI() {
+    if (!currentAccount) return;
+    var payload = { accountId: currentAccount.id, staffId: currentAccount.staffId,
+                    staffName: (selected && selected.name) || '', kind: reqKind, reason: val('rfReason') };
+    if (reqKind === '休暇') {
+      if (!val('rfStart')) { showResultEl('reqFormResult', '開始日を選んでください', false); return; }
+      var unit = val('rfUnit') || '全日';
+      var half = unit !== '全日';
+      var s = val('rfStart'), e = half ? s : (val('rfEnd') || s);
+      var days = half ? 0.5 : (Math.round((new Date(e.replace(/-/g,'/')) - new Date(s.replace(/-/g,'/'))) / 86400000) + 1);
+      if (days < 0.5) days = 1;
+      payload.category = val('rfCategory'); payload.startDate = s; payload.endDate = e; payload.days = days;
+      payload.halfPart = half ? unit : '';
+    } else {
+      if (!val('rfDate') || (!val('rfIn') && !val('rfOut'))) { showResultEl('reqFormResult', '対象日と時刻を入力してください', false); return; }
+      payload.targetDate = val('rfDate'); payload.fixIn = val('rfIn'); payload.fixOut = val('rfOut');
+    }
+    showResultInfo('reqFormResult', '送信中…');
+    google.script.run
+      .withSuccessHandler(function(res){
+        if (res.success) { myPageCache = {}; showResultEl('reqFormResult', '✓ ' + res.message, true); setTimeout(openRequestList, 800); }
+        else showResultEl('reqFormResult', '✗ ' + res.message, false);
+      })
+      .withFailureHandler(function(){ showResultEl('reqFormResult', '通信エラー', false); })
+      .submitRequest(payload);
+  }
+
+  /* --- 申請一覧 --- */
+  function openRequestList() { showOnly('requestListView'); window.scrollTo(0,0); loadRequestList(); }
+  function loadRequestList() {
+    document.getElementById('reqListBody').innerHTML = '<div style="color:#9aa6b8;padding:20px;text-align:center;">読み込み中…</div>';
+    google.script.run.withSuccessHandler(renderRequestList).withFailureHandler(function(){
+      document.getElementById('reqListBody').innerHTML = '<div class="result ng">読み込みに失敗しました</div>';
+    }).getMyRequests(currentAccount.staffId);
+  }
+  function renderRequestList(list) {
+    var box = document.getElementById('reqListBody');
+    if (!list || !list.length) { box.innerHTML = '<div style="color:#9aa6b8;font-size:13px;padding:10px;">申請はまだありません。</div>'; return; }
+    var html = '';
+    list.forEach(function(r){
+      var meta = (r.kind === '打刻修正')
+        ? (r.date + '　出勤 ' + (r.fixIn||'—') + ' / 退勤 ' + (r.fixOut||'—'))
+        : (escapeHtml(r.category) + (r.half ? '（' + r.half + '半休）' : '') + '　' + r.start + (r.end && r.end !== r.start ? '〜' + r.end : '') + '　' + r.days + '日');
+      html += '<div class="req-item">';
+      html += '<div class="req-top"><span class="req-kind">' + escapeHtml(r.kind) + '</span><span class="req-status s-' + r.status + '">' + r.status + '</span></div>';
+      html += '<div class="req-meta">' + meta + '</div>';
+      if (r.reason) html += '<div class="req-meta" style="color:#8a94a6;margin-top:2px;">理由：' + escapeHtml(r.reason) + '</div>';
+      if (r.status === '申請中') html += '<button class="cancel-btn" onclick="cancelReq(\'' + r.id + '\')">取り消す</button>';
+      html += '</div>';
+    });
+    box.innerHTML = html;
+  }
+  function cancelReq(id) {
+    if (!confirm('この申請を取り消しますか？')) return;
+    google.script.run.withSuccessHandler(function(res){
+      if (res.success) loadRequestList(); else alert(res.message || '取消できませんでした');
+    }).withFailureHandler(function(){ alert('通信エラー'); }).cancelRequest(id, currentAccount.id, currentAccount.staffId);
+  }
+
+  // PWAシェル。GitHub Pagesからホーム画面追加した場合もアプリ風に起動。
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('./sw.js').catch(function(e){ console.warn('SW:', e); });
+    });
+  }
+
+</script>
 </body>
 </html>
