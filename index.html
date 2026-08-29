@@ -117,8 +117,11 @@
 
     /* ===== ブラウザ内インカメ撮影 ===== */
     .camera-overlay{position:fixed;inset:0;z-index:1000;background:#111;display:flex;flex-direction:column;}
-    .camera-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#000;}
+    .camera-stage{position:relative;flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#000;}
     #cameraVideo{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+    .camera-freeze{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;}
+    .camera-processing{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.32);padding:24px;}
+    .camera-processing-card{background:rgba(17,17,17,.78);color:#fff;border-radius:16px;padding:14px 20px;font-size:16px;font-weight:700;backdrop-filter:blur(4px);}
     .camera-footer{background:#111;padding:14px 16px calc(14px + env(safe-area-inset-bottom));}
     .camera-guide{text-align:center;color:#fff;font-size:14px;margin-bottom:10px;}
     .camera-actions{display:grid;grid-template-columns:1fr 2fr;gap:10px;}
@@ -390,8 +393,10 @@
 <div id="cameraOverlay" class="camera-overlay hidden">
   <div class="camera-stage">
     <video id="cameraVideo" autoplay playsinline muted></video>
+    <img id="cameraFreezeFrame" class="camera-freeze hidden" alt="撮影した写真">
+    <div id="cameraProcessing" class="camera-processing hidden"><div class="camera-processing-card">打刻を登録中...</div></div>
   </div>
-  <div class="camera-footer">
+  <div class="camera-footer" id="cameraFooter">
     <div class="camera-guide" id="cameraGuide">顔が画面中央に入るようにしてください</div>
     <div class="camera-actions">
       <button class="camera-cancel" onclick="cancelSelfieCamera()">キャンセル</button>
@@ -695,6 +700,7 @@
       return;
     }
 
+    prepareSelfieCameraScreen_();
     document.getElementById('cameraGuide').textContent = selected.name + ' さん / ' + type + '　顔を画面中央に入れてください';
     document.getElementById('cameraShotBtn').disabled = true;
     show('cameraOverlay');
@@ -753,8 +759,9 @@
 
     var type = cameraPunchType;
     var resultId = cameraResultId;
-    stopSelfieCamera();
-    showResultInfo(resultId, '📡 打刻を登録中...');
+
+    // 撮影直後に元画面へ戻さず、撮った写真をカメラ画面に固定して打刻完了を待つ。
+    freezeSelfieCameraScreen_();
     doPunch(type, true, resultId);
   }
 
@@ -813,6 +820,46 @@
     });
   }
 
+  function prepareSelfieCameraScreen_() {
+    var video = document.getElementById('cameraVideo');
+    var freeze = document.getElementById('cameraFreezeFrame');
+    var footer = document.getElementById('cameraFooter');
+    var processing = document.getElementById('cameraProcessing');
+    if (video) video.classList.remove('hidden');
+    if (freeze) { freeze.src = ''; freeze.classList.add('hidden'); }
+    if (footer) footer.classList.remove('hidden');
+    if (processing) processing.classList.add('hidden');
+  }
+
+  function stopSelfieCameraTracks_() {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} });
+    }
+    cameraStream = null;
+    var video = document.getElementById('cameraVideo');
+    if (video) video.srcObject = null;
+  }
+
+  function freezeSelfieCameraScreen_() {
+    var video = document.getElementById('cameraVideo');
+    var freeze = document.getElementById('cameraFreezeFrame');
+    var footer = document.getElementById('cameraFooter');
+    var processing = document.getElementById('cameraProcessing');
+
+    // カメラ映像は止めるが、カメラ画面自体は閉じない。撮影した静止画を背景として残す。
+    if (freeze && lastPhoto) { freeze.src = lastPhoto; freeze.classList.remove('hidden'); }
+    if (video) video.classList.add('hidden');
+    if (footer) footer.classList.add('hidden');
+    if (processing) processing.classList.remove('hidden');
+    stopSelfieCameraTracks_();
+  }
+
+  function setCameraProcessingVisible_(visible) {
+    var el = document.getElementById('cameraProcessing');
+    if (!el) return;
+    el.classList.toggle('hidden', !visible);
+  }
+
   function cancelSelfieCamera() {
     var resultId = cameraResultId;
     stopSelfieCamera();
@@ -825,14 +872,10 @@
   }
 
   function stopSelfieCamera() {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(function(t){ try { t.stop(); } catch(e){} });
-    }
-    cameraStream = null;
+    stopSelfieCameraTracks_();
     cameraPunchType = null;
     cameraResultId = null;
-    var video = document.getElementById('cameraVideo');
-    if (video) video.srcObject = null;
+    prepareSelfieCameraScreen_();
     hide('cameraOverlay');
   }
 
@@ -900,6 +943,8 @@
   function saveQueueList(q) { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); }
 
   function queuePunch(payload, resultId) {
+    // オフライン扱いになった場合はカメラ画面を閉じ、従来どおり打刻画面で未送信を案内する。
+    stopSelfieCamera();
     // 写真は「保存する瞬間」だけ同梱する（通常送信では乗せず通信量を節約）
     if (payload.hasPhoto && lastPhoto) payload.photoDataUrl = lastPhoto;
 
@@ -996,6 +1041,8 @@
 
   function onPunchResult(res, type, resultId, payload) {
     if (!res.success) {
+      // 失敗時はカメラ画面を閉じて、元の打刻画面でエラーを表示する。
+      stopSelfieCamera();
       showResultEl(resultId, '✗ ' + res.message, false);
       lastPhoto = null;
       lastThumb = null;
@@ -1019,8 +1066,9 @@
     applyPunchButtonState(sid, list, listId);
     hide(resultId);
 
-    // 打刻成功が確定した時点で、その場に完了ポップアップを表示。
-    // 写真保存・GPS追記はこの後もバックグラウンドで続けるため、ユーザーを待たせない。
+    // 打刻成功が確定してもカメラ画面はまだ閉じない。
+    // 撮影した静止画の上に完了メッセージを表示する。
+    setCameraProcessingVisible_(false);
     showPunchCompleteModal(type, res.time || (payload && payload.clientTimeStr) || '');
 
     // 写真は打刻完了後にバックグラウンド保存。画面遷移を待たせない。
@@ -1085,6 +1133,8 @@
       punchCompleteTimer = null;
     }
     hide('punchCompleteOverlay');
+    // 確認または5秒経過で初めてカメラ画面を閉じる。
+    stopSelfieCamera();
     // カメラを開く直前の打刻画面にそのまま戻る。
     if (appMode === 'kiosk') {
       if (selected) {
