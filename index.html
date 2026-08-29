@@ -129,6 +129,23 @@
     .shutter-flash.fire{animation:shutterFlash .18s ease-out;}
     @keyframes shutterFlash{0%{opacity:0;}20%{opacity:.98;}55%{opacity:.82;}100%{opacity:0;}}
 
+    /* ===== 打刻完了ポップアップ ===== */
+    .punch-complete-overlay{position:fixed;inset:0;z-index:2300;background:rgba(20,29,43,.58);
+                            display:flex;align-items:center;justify-content:center;padding:24px;}
+    .punch-complete-card{width:min(100%,360px);background:#fff;border-radius:22px;padding:28px 22px 22px;
+                         text-align:center;box-shadow:0 18px 60px rgba(20,29,43,.28);
+                         animation:punchCompleteIn .2s ease-out;}
+    @keyframes punchCompleteIn{from{opacity:0;transform:translateY(10px) scale(.97);}to{opacity:1;transform:none;}}
+    .punch-complete-icon{width:62px;height:62px;border-radius:50%;margin:0 auto 14px;display:flex;align-items:center;justify-content:center;
+                         background:#e8f7ef;color:#168a55;font-size:32px;font-weight:bold;}
+    .punch-complete-message{font-size:20px;font-weight:800;line-height:1.55;color:#33455c;margin:4px 0 14px;}
+    .punch-complete-time-row{font-size:14px;color:#7f8b9d;margin-bottom:22px;}
+    .punch-complete-time-row strong{font-size:17px;color:#33455c;margin-left:6px;}
+    .punch-complete-auto{font-size:11px;color:#9aa6b8;margin-top:10px;}
+    .punch-complete-ok{width:100%;border:none;border-radius:13px;padding:15px 12px;background:#2c7be5;color:#fff;
+                       font-size:17px;font-weight:800;cursor:pointer;}
+    .punch-complete-ok:active{opacity:.82;transform:scale(.99);}
+
     /* ===== スタッフ用ナビ ===== */
     .nav-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
     .nav-btn{padding:10px 4px;font-size:13px;font-weight:bold;color:#2c7be5;background:#eaf2fd;
@@ -383,6 +400,18 @@
   </div>
 </div>
 <div id="shutterFlash" class="shutter-flash" aria-hidden="true"></div>
+
+<!-- 打刻成功後の完了ポップアップ。確認ボタンまたは5秒経過で閉じます -->
+<div id="punchCompleteOverlay" class="punch-complete-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="punchCompleteMessage">
+  <div class="punch-complete-card">
+    <div class="punch-complete-icon">✓</div>
+    <div class="punch-complete-message" id="punchCompleteMessage"></div>
+    <div class="punch-complete-time-row">記録時間 <strong id="punchCompleteTime">--:--</strong></div>
+    <button type="button" class="punch-complete-ok" id="punchCompleteOk" onclick="closePunchCompleteModal()">確認</button>
+    <div class="punch-complete-auto">5秒後に自動で戻ります</div>
+  </div>
+</div>
+
 <canvas id="canvas" class="hidden"></canvas>
 
 <!-- GAS通信専用。各RPCごとにhidden iframeへPOSTし、GASからwindow.topへ結果を返します -->
@@ -527,6 +556,7 @@
   var cameraPressedAt = null;
   var currentYm      = null;
   var reqKind        = '打刻修正';
+  var punchCompleteTimer = null;
 
   /* ===== オフライン打刻キュー ===== */
   var QUEUE_KEY   = 'kintai_offline_queue';
@@ -987,7 +1017,11 @@
     var listId = appMode === 'kiosk' ? 'kioskTodayList' : 'mobileTodayList';
     renderTodayList(list, listId);
     applyPunchButtonState(sid, list, listId);
-    showResultEl(resultId, '✓ ' + type + ' ' + (res.time || ''), true);
+    hide(resultId);
+
+    // 打刻成功が確定した時点で、その場に完了ポップアップを表示。
+    // 写真保存・GPS追記はこの後もバックグラウンドで続けるため、ユーザーを待たせない。
+    showPunchCompleteModal(type, res.time || (payload && payload.clientTimeStr) || '');
 
     // 写真は打刻完了後にバックグラウンド保存。画面遷移を待たせない。
     if (photoToSend) {
@@ -1016,16 +1050,52 @@
     lastThumb = null;
     myPageCache = {};
 
+    // ポップアップは確認ボタン、または5秒経過で閉じて元の打刻画面へ戻る。
     if (appMode === 'kiosk') {
-      setTimeout(function(){
-        hide('kioskPunchView'); show('gridView'); selected = null; renderGrid();
-        // サーバー整合確認は画面表示後に行う。
-        setTimeout(refreshKioskGrid, 900);
-      }, 320);
+      setTimeout(refreshKioskGrid, 1800);
     } else {
-      setTimeout(function(){ hide(resultId); }, 700);
-      // 念のため数秒後にサーバーと再同期するが、ユーザー操作は待たせない。
       setTimeout(function(){ if (selected) loadTodayStatus(sid, 'mobileTodayList'); }, 1800);
+    }
+  }
+
+  function showPunchCompleteModal(type, time) {
+    var message = type === '退勤'
+      ? '今日も一日、お疲れさまでした！'
+      : '今日も一日、頑張りましょう！';
+    var t = String(time || '').trim();
+    if (t && t.length >= 5) t = t.slice(0, 5);
+    setText('punchCompleteTime', t || '--:--');
+    setText('punchCompleteMessage', message);
+    show('punchCompleteOverlay');
+
+    if (punchCompleteTimer) clearTimeout(punchCompleteTimer);
+    punchCompleteTimer = setTimeout(function(){
+      closePunchCompleteModal();
+    }, 5000);
+
+    setTimeout(function(){
+      var b = document.getElementById('punchCompleteOk');
+      if (b) try { b.focus({preventScroll:true}); } catch(e) { b.focus(); }
+    }, 40);
+  }
+
+  function closePunchCompleteModal() {
+    if (punchCompleteTimer) {
+      clearTimeout(punchCompleteTimer);
+      punchCompleteTimer = null;
+    }
+    hide('punchCompleteOverlay');
+    // カメラを開く直前の打刻画面にそのまま戻る。
+    if (appMode === 'kiosk') {
+      if (selected) {
+        showOnly('kioskPunchView');
+        window.scrollTo(0, 0);
+      } else {
+        showOnly('gridView');
+      }
+    } else if (appMode === 'staff') {
+      showOnly('mobilePunchView');
+      window.scrollTo(0, 0);
     }
   }
 
