@@ -381,88 +381,97 @@
 </div>
 <canvas id="canvas" class="hidden"></canvas>
 
-<!-- GAS通信専用。画面やカメラはGitHub Pages側で動作します -->
-<iframe id="gasBridge" title="GAS Bridge" aria-hidden="true" tabindex="-1" style="display:none"></iframe>
-
+<!-- GAS通信専用。各RPCごとにhidden iframeへPOSTし、GASからwindow.topへ結果を返します -->
 <script>
 
   /* =========================================================
-   * GitHub Pages -> GAS Bridge
-   * google.script.run 互換シム。既存UIロジックをほぼ変更せずGASを呼び出す。
+   * GitHub Pages -> GAS RPC (V4)
+   * GAS HTML Serviceの二重iframeを避けるため、postMessageで命令を送らず、
+   * hidden form POSTで命令を送り、GASレスポンスからwindow.topへ結果を返す。
    * =======================================================*/
   var GAS_BRIDGE_URL = (window.KINTAI_CONFIG && window.KINTAI_CONFIG.gasWebAppUrl) || '';
-  var gasBridgeFrame = document.getElementById('gasBridge');
-  var bridgeReady = false;
   var bridgeSeq = 0;
   var bridgePending = {};
-  var bridgeReadyWaiters = [];
 
   function normalizeGasUrl_(url) {
     return String(url || '').trim().replace(/\/$/, '');
   }
 
-  function initGasBridge_() {
-    GAS_BRIDGE_URL = normalizeGasUrl_(GAS_BRIDGE_URL);
-    if (!GAS_BRIDGE_URL || GAS_BRIDGE_URL.indexOf('PASTE_') === 0) {
-      console.error('config.js の gasWebAppUrl を設定してください。');
-      return;
+  GAS_BRIDGE_URL = normalizeGasUrl_(GAS_BRIDGE_URL);
+  if (!GAS_BRIDGE_URL || GAS_BRIDGE_URL.indexOf('PASTE_') === 0) {
+    console.error('config.js の gasWebAppUrl を設定してください。');
+  }
+
+  function randomId_() {
+    try {
+      var a = new Uint32Array(2);
+      crypto.getRandomValues(a);
+      return 'g' + Date.now() + '_' + a[0].toString(36) + a[1].toString(36);
+    } catch(e) {
+      return 'g' + Date.now() + '_' + (++bridgeSeq) + '_' + Math.random().toString(36).slice(2);
     }
-    gasBridgeFrame.src = GAS_BRIDGE_URL + (GAS_BRIDGE_URL.indexOf('?') >= 0 ? '&' : '?') + 'bridge=1';
-    gasBridgeFrame.addEventListener('load', function(){
-      try { gasBridgeFrame.contentWindow.postMessage({ type:'kintai-bridge-ping' }, '*'); } catch(e) {}
-    });
   }
 
   window.addEventListener('message', function(ev) {
-    if (!gasBridgeFrame || ev.source !== gasBridgeFrame.contentWindow) return;
     var msg = ev.data || {};
-    if (msg.type === 'kintai-bridge-ready') {
-      bridgeReady = true;
-      var ws = bridgeReadyWaiters.splice(0);
-      ws.forEach(function(w){ w.resolve(); });
-      return;
-    }
-    if (msg.type !== 'kintai-bridge-response' || !msg.id) return;
+    if (msg.type !== 'kintai-rpc-response' || !msg.id) return;
     var p = bridgePending[msg.id];
     if (!p) return;
     delete bridgePending[msg.id];
     clearTimeout(p.timer);
+    try { if (p.iframe && p.iframe.parentNode) p.iframe.parentNode.removeChild(p.iframe); } catch(e) {}
     if (msg.ok) p.resolve(msg.result);
     else p.reject(new Error(msg.error || 'GAS通信エラー'));
   });
 
-  function waitBridgeReady_() {
-    if (bridgeReady) return Promise.resolve();
-    return new Promise(function(resolve, reject){
-      var timer = setTimeout(function(){
-        var i = bridgeReadyWaiters.findIndex(function(x){ return x.resolve === resolve; });
-        if (i >= 0) bridgeReadyWaiters.splice(i,1);
-        reject(new Error('GAS Bridgeに接続できません。config.js とGAS設定を確認してください。'));
-      }, 12000);
-      bridgeReadyWaiters.push({
-        resolve: function(){ clearTimeout(timer); resolve(); },
-        reject: reject
-      });
-      try { gasBridgeFrame.contentWindow.postMessage({ type:'kintai-bridge-ping' }, '*'); } catch(e) {}
-    });
-  }
-
   function bridgeCall_(method, args) {
-    return waitBridgeReady_().then(function(){
-      return new Promise(function(resolve, reject){
-        var id = 'g' + Date.now() + '_' + (++bridgeSeq);
-        var timer = setTimeout(function(){
-          delete bridgePending[id];
-          reject(new Error('GAS応答タイムアウト'));
-        }, 20000);
-        bridgePending[id] = { resolve: resolve, reject: reject, timer: timer };
-        gasBridgeFrame.contentWindow.postMessage({
-          type: 'kintai-bridge-call',
-          id: id,
-          method: method,
-          args: args || []
-        }, '*');
+    return new Promise(function(resolve, reject) {
+      if (!GAS_BRIDGE_URL) { reject(new Error('GAS WebアプリURLが未設定です。')); return; }
+
+      var id = randomId_();
+      var frameName = 'gas_rpc_' + id.replace(/[^a-zA-Z0-9_]/g, '');
+      var iframe = document.createElement('iframe');
+      iframe.name = frameName;
+      iframe.style.display = 'none';
+      iframe.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(iframe);
+
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = GAS_BRIDGE_URL;
+      form.target = frameName;
+      form.style.display = 'none';
+
+      var input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'rpc';
+      input.value = JSON.stringify({
+        type: 'kintai-rpc',
+        id: id,
+        method: String(method),
+        args: args || []
       });
+      form.appendChild(input);
+      document.body.appendChild(form);
+
+      var timer = setTimeout(function() {
+        delete bridgePending[id];
+        try { if (form.parentNode) form.parentNode.removeChild(form); } catch(e) {}
+        try { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch(e) {}
+        reject(new Error('GAS応答タイムアウト'));
+      }, 30000);
+
+      bridgePending[id] = { resolve: resolve, reject: reject, timer: timer, iframe: iframe };
+      try {
+        form.submit();
+      } catch(e) {
+        clearTimeout(timer);
+        delete bridgePending[id];
+        try { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch(e2) {}
+        reject(e);
+      } finally {
+        try { if (form.parentNode) form.parentNode.removeChild(form); } catch(e3) {}
+      }
     });
   }
 
@@ -494,8 +503,6 @@
     configurable: true,
     get: function(){ return makeGasRunner_(null, null); }
   });
-
-  initGasBridge_();
 
   var STORAGE_KEY    = 'kintai_account_id';
   var ACCOUNT_KEY    = 'kintai_account';
