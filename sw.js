@@ -1,4 +1,4 @@
-const CACHE_NAME = 'katsuki-kintai-v4-1';
+const CACHE_NAME = 'katsuki-kintai-v4-2';
 const SHELL = ['./', './index.html', './manifest.webmanifest'];
 
 self.addEventListener('install', event => {
