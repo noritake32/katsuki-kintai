@@ -1,4 +1,4 @@
-const CACHE_NAME = 'katsuki-kintai-v3-1';
+const CACHE_NAME = 'katsuki-kintai-v4-1';
 const SHELL = ['./', './index.html', './manifest.webmanifest'];
 
 self.addEventListener('install', event => {
@@ -18,7 +18,6 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
   if (req.method !== 'GET') return;
 
-  // 設定ファイルは常に最新版を優先
   if (url.pathname.endsWith('/config.js')) {
     event.respondWith(fetch(req).catch(() => caches.match(req)));
     return;
