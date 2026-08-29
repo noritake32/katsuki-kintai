@@ -125,6 +125,9 @@
     .camera-cancel,.camera-shot{border:none;border-radius:14px;padding:16px 10px;font-size:17px;font-weight:bold;cursor:pointer;}
     .camera-cancel{background:#343a40;color:#fff;}
     .camera-shot{background:#2ec27e;color:#fff;}
+    .shutter-flash{position:fixed;inset:0;z-index:2200;background:#fff;opacity:0;pointer-events:none;}
+    .shutter-flash.fire{animation:shutterFlash .18s ease-out;}
+    @keyframes shutterFlash{0%{opacity:0;}20%{opacity:.98;}55%{opacity:.82;}100%{opacity:0;}}
 
     /* ===== スタッフ用ナビ ===== */
     .nav-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
@@ -379,6 +382,7 @@
     </div>
   </div>
 </div>
+<div id="shutterFlash" class="shutter-flash" aria-hidden="true"></div>
 <canvas id="canvas" class="hidden"></canvas>
 
 <!-- GAS通信専用。各RPCごとにhidden iframeへPOSTし、GASからwindow.topへ結果を返します -->
@@ -512,7 +516,12 @@
   var selected       = null;
   var livePhotos     = {};
   var lastPhoto      = null;
+  var lastThumb      = null;
   var cameraStream   = null;
+  var punchLocationPromise = null;
+  var punchLocationById = {};
+  var lastKnownLocation = '';
+  var lastKnownLocationAt = 0;
   var cameraPunchType = null;
   var cameraResultId  = null;
   var cameraPressedAt = null;
@@ -583,7 +592,7 @@
     setText('kioskName', '拠点：' + currentAccount.displayName);
     google.script.run.withSuccessHandler(function(d) {
       setText('companyName', d.companyName); document.title = d.companyName;
-      allStaff = d.staffList || []; renderGrid();
+      allStaff = d.staffList || []; livePhotos = d.photos || livePhotos || {}; renderGrid();
     }).withFailureHandler(function(){}).getKioskData();
   }
 
@@ -599,22 +608,22 @@
 
   function refreshKioskGrid() {
     if (appMode !== 'kiosk' || !isVisible('gridView')) return;
-    google.script.run.withSuccessHandler(function(d) { allStaff = d.staffList || []; renderGrid(); }).withFailureHandler(function(){}).getKioskData();
+    google.script.run.withSuccessHandler(function(d) { allStaff = d.staffList || []; livePhotos = d.photos || livePhotos || {}; renderGrid(); }).withFailureHandler(function(){}).getKioskData();
   }
 
   function openKioskPunch(staff) {
     selected = { id: staff.id, name: staff.name }; setText('kpName', staff.name);
-    var av = document.getElementById('kpAvatar'); av.className = 'avatar ' + avClass(staff.status); av.innerHTML = avatarInner(staff);
+    var av = document.getElementById('kpAvatar'); av.className = 'avatar ' + (livePhotos[staff.id] ? 'av-photo' : avClass(staff.status)); av.innerHTML = avatarInner(staff);
     hide('kioskResult'); showOnly('kioskPunchView'); window.scrollTo(0, 0); loadTodayStatus(staff.id, 'kioskTodayList');
   }
 
   function backToGrid() {
     hide('kioskPunchView'); show('gridView'); selected = null;
-    google.script.run.withSuccessHandler(function(d) { allStaff = d.staffList || []; renderGrid(); }).withFailureHandler(function(){}).getKioskData();
+    google.script.run.withSuccessHandler(function(d) { allStaff = d.staffList || []; livePhotos = d.photos || livePhotos || {}; renderGrid(); }).withFailureHandler(function(){}).getKioskData();
   }
 
   function kioskPunch(type) {
-    hide('kioskResult'); lastPhoto = null;
+    hide('kioskResult'); lastPhoto = null; lastThumb = null;
     startSelfieCamera(type, 'kioskResult');
   }
 
@@ -626,14 +635,16 @@
     google.script.run.withSuccessHandler(function(d) {
       document.title = d.companyName; if (!d.staff) { showLogin(); return; }
       selected = { id: d.staff.id, name: d.staff.name };
-      var av = document.getElementById('mpAvatar'); av.className = 'avatar ' + avClass(d.staff.status); av.innerHTML = avatarInner(d.staff);
+      if (d.photo) livePhotos[d.staff.id] = d.photo;
+      else if (d.staff.status !== '勤務中') delete livePhotos[d.staff.id];
+      var av = document.getElementById('mpAvatar'); av.className = 'avatar ' + (livePhotos[d.staff.id] ? 'av-photo' : avClass(d.staff.status)); av.innerHTML = avatarInner(d.staff);
       setText('mpName', d.staff.name); hide('mobileResult'); renderTodayList(d.today, 'mobileTodayList');
       applyPunchButtonState(d.staff.id, d.today, 'mobileTodayList');
     }).withFailureHandler(function(){}).getStaffData(staffId);
   }
 
   function mobilePunch(type) {
-    hide('mobileResult'); lastPhoto = null;
+    hide('mobileResult'); lastPhoto = null; lastThumb = null;
     startSelfieCamera(type, 'mobileResult');
   }
 
@@ -643,6 +654,7 @@
     cameraPunchType = type;
     cameraResultId = resultId;
     cameraPressedAt = new Date(); // 出勤/退勤ボタンを押した瞬間を打刻時刻として保持
+    punchLocationPromise = beginPunchLocationPrefetch_(); // カメラ操作中にGPSを裏で先取り
     setPunchButtonsBusy(true);
 
     var media = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
@@ -689,25 +701,94 @@
     var canvas = document.getElementById('canvas');
     var srcW = video.videoWidth || 720;
     var srcH = video.videoHeight || 960;
-    var maxSide = 720;
+
+    // 証跡用途には十分なサイズまで圧縮。送信量を減らして体感速度を上げる。
+    var maxSide = 560;
     var scale = Math.min(1, maxSide / Math.max(srcW, srcH));
     canvas.width = Math.round(srcW * scale);
     canvas.height = Math.round(srcH * scale);
     var ctx = canvas.getContext('2d');
+
+    // プレビューと同じ鏡像で保存する。
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    lastPhoto = canvas.toDataURL('image/jpeg', 0.72);
+    ctx.restore();
+
+    lastPhoto = canvas.toDataURL('image/jpeg', 0.62);
+    lastThumb = makeThumbFast_(canvas, 80, 0.50);
+
+    fireShutterEffect_();
 
     var type = cameraPunchType;
     var resultId = cameraResultId;
     stopSelfieCamera();
-    showResultInfo(resultId, '📍 打刻処理中...');
+    showResultInfo(resultId, '📡 打刻を登録中...');
     doPunch(type, true, resultId);
+  }
+
+  function fireShutterEffect_() {
+    var flash = document.getElementById('shutterFlash');
+    if (flash) {
+      flash.classList.remove('fire');
+      void flash.offsetWidth;
+      flash.classList.add('fire');
+      setTimeout(function(){ flash.classList.remove('fire'); }, 220);
+    }
+    try { if (navigator.vibrate) navigator.vibrate(28); } catch(e) {}
+  }
+
+  function makeThumbFast_(sourceCanvas, size, quality) {
+    try {
+      var c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      var sw = sourceCanvas.width, sh = sourceCanvas.height;
+      var crop = Math.min(sw, sh);
+      var sx = Math.round((sw - crop) / 2), sy = Math.round((sh - crop) / 2);
+      c.getContext('2d').drawImage(sourceCanvas, sx, sy, crop, crop, 0, 0, size, size);
+      return c.toDataURL('image/jpeg', quality);
+    } catch(e) { return null; }
+  }
+
+  function getFreshLocation_() {
+    if (lastKnownLocation && (Date.now() - lastKnownLocationAt) <= 120000) return lastKnownLocation;
+    return '';
+  }
+
+  function beginPunchLocationPrefetch_() {
+    var cached = getFreshLocation_();
+    if (cached) return Promise.resolve(cached);
+    if (!navigator.geolocation) return Promise.resolve('GPS非対応');
+
+    return new Promise(function(resolve) {
+      var done = false;
+      var finish = function(v) {
+        if (done) return; done = true;
+        if (v && v.indexOf('https://www.google.com/maps?q=') === 0) {
+          lastKnownLocation = v;
+          lastKnownLocationAt = Date.now();
+        }
+        resolve(v || '取得エラー');
+      };
+      var fallback = setTimeout(function(){ finish('取得タイムアウト'); }, 2000);
+      navigator.geolocation.getCurrentPosition(
+        function(pos) {
+          clearTimeout(fallback);
+          finish('https://www.google.com/maps?q=' + pos.coords.latitude + ',' + pos.coords.longitude);
+        },
+        function() { clearTimeout(fallback); finish('取得エラー'); },
+        { enableHighAccuracy: false, timeout: 1800, maximumAge: 120000 }
+      );
+    });
   }
 
   function cancelSelfieCamera() {
     var resultId = cameraResultId;
     stopSelfieCamera();
     lastPhoto = null;
+    lastThumb = null;
+    punchLocationPromise = null;
     cameraPressedAt = null;
     if (selected) loadTodayStatus(selected.id, appMode === 'kiosk' ? 'kioskTodayList' : 'mobileTodayList');
     if (resultId) hide(resultId);
@@ -729,7 +810,6 @@
   function doPunch(type, hasPhoto, resultId) {
     if (!selected || !currentAccount) return;
 
-    // ★押した瞬間の時刻をこの端末で確保しておく（後から送信が遅れても打刻時刻がズレない）
     var pressedAt = cameraPressedAt || new Date();
     cameraPressedAt = null;
     var clientDateStr = pressedAt.getFullYear() + '/' + pad(pressedAt.getMonth()+1) + '/' + pad(pressedAt.getDate());
@@ -737,49 +817,30 @@
     var clientHHMM    = pad(pressedAt.getHours()) + ':' + pad(pressedAt.getMinutes());
     var clientPunchId = 'p' + pressedAt.getTime() + '_' + Math.random().toString(36).slice(2, 8);
 
-    var payload = { accountId: currentAccount.id, staffId: selected.id, staffName: selected.name, type: type, hasPhoto: hasPhoto, device: navigator.userAgent, location: '',
-                    clientPunchId: clientPunchId, clientDateStr: clientDateStr, clientTimeStr: clientTimeStr, clientHHMM: clientHHMM };
+    var prefetched = selected.id === 'S000' ? 'GPS不要（S000）' : getFreshLocation_();
+    var payload = {
+      accountId: currentAccount.id,
+      staffId: selected.id,
+      staffName: selected.name,
+      type: type,
+      hasPhoto: hasPhoto,
+      device: navigator.userAgent,
+      location: prefetched,
+      liveThumb: (type === '出勤' && lastThumb) ? lastThumb : '',
+      clientPunchId: clientPunchId,
+      clientDateStr: clientDateStr,
+      clientTimeStr: clientTimeStr,
+      clientHHMM: clientHHMM
+    };
 
-    if (selected.id === 'S000') {
-      payload.location = 'GPS不要（S000）';
-      showResultInfo(resultId, '📡 データを送信中...');
-      sendPunch(payload, type, resultId);
-      return;
+    // GPSは打刻本体を待たせない。未取得なら打刻成功後に位置情報だけ追記する。
+    if (!payload.location && punchLocationPromise) {
+      punchLocationById[clientPunchId] = punchLocationPromise;
     }
+    punchLocationPromise = null;
 
-    var geoDone = false;
-    // ★GPSの応答自体が来ない端末があるための保険（最長6秒で強制的に先へ進む）
-    var geoFallback = setTimeout(function(){
-      if (geoDone) return; geoDone = true;
-      payload.location = '取得タイムアウト';
-      showResultInfo(resultId, '📡 データを送信中...');
-      sendPunch(payload, type, resultId);
-    }, 3500);
-
-    if (navigator.geolocation) {
-      showResultInfo(resultId, '📍 位置情報を取得中...');
-      navigator.geolocation.getCurrentPosition(
-        function(pos) {
-          if (geoDone) return; geoDone = true; clearTimeout(geoFallback);
-          payload.location = 'https://www.google.com/maps?q=' + pos.coords.latitude + ',' + pos.coords.longitude;
-          showResultInfo(resultId, '📡 データを送信中...');
-          sendPunch(payload, type, resultId);
-        },
-        function(err) {
-          if (geoDone) return; geoDone = true; clearTimeout(geoFallback);
-          // ★位置情報の失敗は打刻を止める理由にしない。「取得できなかった」とだけ記録して先へ進む
-          payload.location = '取得エラー';
-          showResultInfo(resultId, '📡 データを送信中...');
-          sendPunch(payload, type, resultId);
-        },
-        { enableHighAccuracy: true, timeout: 3000, maximumAge: 30000 }
-      );
-    } else {
-      clearTimeout(geoFallback);
-      payload.location = 'GPS非対応';
-      showResultInfo(resultId, '📡 データを送信中...');
-      sendPunch(payload, type, resultId);
-    }
+    showResultInfo(resultId, '📡 打刻を登録中...');
+    sendPunch(payload, type, resultId);
   }
 
   function sendPunch(payload, type, resultId) {
@@ -793,7 +854,7 @@
     google.script.run
       .withSuccessHandler(function(res) {
         if (settled) return; settled = true; clearTimeout(timer);
-        onPunchResult(res, type, resultId);
+        onPunchResult(res, type, resultId, payload);
       })
       .withFailureHandler(function(err) {
         if (settled) return; settled = true; clearTimeout(timer);
@@ -826,7 +887,15 @@
     showResultEl(resultId, '📶 通信できなかったため端末に一時保存しました。電波が戻り次第、自動で送信します。', true);
     renderQueueBadges();
 
+    // GPSが後から取れた場合は未送信キューへ追記しておく。
+    var locPromise = punchLocationById[payload.clientPunchId];
+    if (locPromise) {
+      delete punchLocationById[payload.clientPunchId];
+      locPromise.then(function(loc){ updateQueuedPunchLocation_(payload.clientPunchId, loc); });
+    }
+
     lastPhoto = null;
+    lastThumb = null;
     myPageCache = {};
     // キオスクは一覧へ、スマホはそのまま留まる（見た目は通常の打刻と同じ流れ）
     if (appMode === 'kiosk') { setTimeout(backToGrid, 1400); }
@@ -835,6 +904,16 @@
 
   function queueCountFor(staffId) {
     return loadQueue().filter(function(x){ return String(x.staffId) === String(staffId); }).length;
+  }
+
+  function updateQueuedPunchLocation_(clientPunchId, location) {
+    if (!clientPunchId || !location) return;
+    var q = loadQueue();
+    var changed = false;
+    q.forEach(function(x){
+      if (x.clientPunchId === clientPunchId && !x.location) { x.location = location; changed = true; }
+    });
+    if (changed) { try { saveQueueList(q); } catch(e) {} }
   }
 
   function renderQueueBadges() {
@@ -853,6 +932,8 @@
     if (!q.length) { renderQueueBadges(); return; }
     isFlushing = true;
     var item = q[0];
+    var sendItem = Object.assign({}, item);
+    delete sendItem.photoDataUrl;
 
     google.script.run
       .withSuccessHandler(function(res) {
@@ -880,32 +961,90 @@
       .withFailureHandler(function() {
         isFlushing = false; // まだ繋がらない。次のタイミングで再挑戦
       })
-      .recordPunch(item);
+      .recordPunch(sendItem);
   }
 
-  function onPunchResult(res, type, resultId) {
+  function onPunchResult(res, type, resultId, payload) {
     if (!res.success) {
       showResultEl(resultId, '✗ ' + res.message, false);
       lastPhoto = null;
+      lastThumb = null;
+      if (payload && payload.clientPunchId) delete punchLocationById[payload.clientPunchId];
       if (selected) loadTodayStatus(selected.id, appMode === 'kiosk' ? 'kioskTodayList' : 'mobileTodayList');
       return;
     }
     var sid = selected.id;
+    var photoToSend = lastPhoto;
+    var thumbToShow = lastThumb;
 
-    // 打刻本体の成功を先に確定。写真保存は裏で実行して画面遷移を待たせない。
-    if (lastPhoto) {
-      var photoToSend = lastPhoto;
+    // 画面はサーバー再読込を待たず、その場で即時反映する。
+    if (type === '出勤' && thumbToShow) livePhotos[sid] = thumbToShow;
+    if (type === '退勤') delete livePhotos[sid];
+    updateCurrentAvatar_(sid, type === '出勤' ? '勤務中' : '勤務外');
+    updateLocalStaffStatus_(sid, type === '出勤' ? '勤務中' : '勤務外');
+
+    var list = res.today || [];
+    var listId = appMode === 'kiosk' ? 'kioskTodayList' : 'mobileTodayList';
+    renderTodayList(list, listId);
+    applyPunchButtonState(sid, list, listId);
+    showResultEl(resultId, '✓ ' + type + ' ' + (res.time || ''), true);
+
+    // 写真は打刻完了後にバックグラウンド保存。画面遷移を待たせない。
+    if (photoToSend) {
       google.script.run
         .withFailureHandler(function(){})
         .savePunchPhoto({ staffId: sid, staffName: selected.name, type: type,
                           time: res.time || '', recordId: res.recordId || '', photoDataUrl: photoToSend });
     }
 
-    hide(resultId);
+    // GPSも未取得ならバックグラウンドで追記。
+    if (payload && !payload.location) {
+      var locPromise = punchLocationById[payload.clientPunchId];
+      delete punchLocationById[payload.clientPunchId];
+      if (locPromise) {
+        locPromise.then(function(loc){
+          if (!loc) return;
+          google.script.run.withFailureHandler(function(){}).updatePunchLocation({
+            accountId: currentAccount.id, staffId: sid, type: type,
+            recordId: res.recordId || '', location: loc
+          });
+        });
+      }
+    }
+
     lastPhoto = null;
+    lastThumb = null;
     myPageCache = {};
-    if (appMode === 'kiosk') backToGrid();
-    else loadTodayStatus(sid, 'mobileTodayList');
+
+    if (appMode === 'kiosk') {
+      setTimeout(function(){
+        hide('kioskPunchView'); show('gridView'); selected = null; renderGrid();
+        // サーバー整合確認は画面表示後に行う。
+        setTimeout(refreshKioskGrid, 900);
+      }, 320);
+    } else {
+      setTimeout(function(){ hide(resultId); }, 700);
+      // 念のため数秒後にサーバーと再同期するが、ユーザー操作は待たせない。
+      setTimeout(function(){ if (selected) loadTodayStatus(sid, 'mobileTodayList'); }, 1800);
+    }
+  }
+
+  function updateCurrentAvatar_(sid, status) {
+    var ids = appMode === 'kiosk' ? ['kpAvatar'] : ['mpAvatar'];
+    ids.forEach(function(id){
+      var av = document.getElementById(id); if (!av) return;
+      if (livePhotos[sid]) {
+        av.className = 'avatar av-photo';
+        av.innerHTML = '<img src="' + livePhotos[sid] + '" alt="">';
+      } else {
+        av.className = 'avatar ' + avClass(status);
+        av.textContent = initialOf(selected && selected.name ? selected.name : '');
+      }
+    });
+  }
+
+  function updateLocalStaffStatus_(sid, status) {
+    (allStaff || []).forEach(function(s){ if (String(s.id) === String(sid)) s.status = status; });
   }
 
   /* --- 共通部品 --- */
@@ -972,8 +1111,14 @@
     var h = pad(now.getHours()), m = pad(now.getMinutes()), s = pad(now.getSeconds());
     setText('gridDate', d); setText('gridTime', h + ':' + m); setText('kpDate', d); setText('kpTime', h + ':' + m + ':' + s); setText('mpDate', d); setText('mpTime', h + ':' + m + ':' + s);
   }
-  function avatarInner(s) { return initialOf(s.name); }
-  function avatarHtml(s) { return '<div class="avatar ' + avClass(s.status) + '">' + initialOf(s.name) + '</div>'; }
+  function avatarInner(s) {
+    if (livePhotos[s.id]) return '<img src="' + livePhotos[s.id] + '" alt="">';
+    return initialOf(s.name);
+  }
+  function avatarHtml(s) {
+    if (livePhotos[s.id]) return '<div class="avatar av-photo"><img src="' + livePhotos[s.id] + '" alt=""></div>';
+    return '<div class="avatar ' + avClass(s.status) + '">' + initialOf(s.name) + '</div>';
+  }
   function avClass(st) { return st==='勤務中'?'av-on':'av-off'; }
   function badgeClass(st) { return st==='勤務中'?'b-on':'b-off'; }
   function initialOf(n) { return String(n||'').trim().charAt(0) || '？'; }
