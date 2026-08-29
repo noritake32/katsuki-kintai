@@ -3,6 +3,14 @@ window.KINTAI_CONFIG = {
   gasWebAppUrl: 'https://script.google.com/macros/s/AKfycbzlHgfl1ggoWCp3vXX3gtKf7aQaGAGpWycUPo1pbonWou12Ul-NuQtAtuRyBB5n79z8/exec'
 };
 
+// STEP4: 休日・シフトUI拡張を読み込む。
+(function(){
+  var s=document.createElement('script');
+  s.src='./schedule-extension.js?v=20260829-step4';
+  s.defer=true;
+  document.head.appendChild(s);
+})();
+
 // =========================================================
 // Login route compatibility fix
 // - 管理者アカウントをスタッフ画面へ誤ルーティングしない
@@ -17,8 +25,6 @@ window.addEventListener('load', function () {
         return;
       }
 
-      // 管理者は打刻アプリ上では拠点モードへ。
-      // これまでの「管理者 -> S012スタッフ画面」という誤ルーティングを防止する。
       if (account.type === '拠点' || account.type === '管理者') {
         if (typeof window.enterKiosk === 'function') window.enterKiosk();
         return;
@@ -29,7 +35,6 @@ window.addEventListener('load', function () {
         return;
       }
 
-      // 不明な種別は自動ログアウトさせず、ログイン画面に説明を出す。
       if (typeof window.showLogin === 'function') window.showLogin();
       if (typeof window.showLoginError === 'function') {
         window.showLoginError('このアカウントの種別設定を確認してください。');
@@ -53,11 +58,9 @@ window.addEventListener('load', function () {
 
       window.google.script.run
         .withSuccessHandler(function (d) {
-          // 別アカウントへ切り替わった後の古い応答は無視する。
           if (!window.currentAccount || String(window.currentAccount.id || '') !== accountIdAtStart) return;
 
           if (!d || !d.staff) {
-            // ここで showLogin() を呼ぶと、遅延応答だけで勝手にログアウトしてしまうため禁止。
             if (typeof window.showResultEl === 'function') {
               window.showResultEl('mobileResult', 'スタッフ情報を確認できませんでした。再読み込みしても直らない場合は管理者へ連絡してください。', false);
             }
@@ -82,7 +85,6 @@ window.addEventListener('load', function () {
           window.applyPunchButtonState(d.staff.id, d.today, 'mobileTodayList');
         })
         .withFailureHandler(function () {
-          // 通信失敗ではログイン状態を維持する。
           if (typeof window.showResultEl === 'function') {
             window.showResultEl('mobileResult', '通信が不安定です。接続が戻ると自動的に利用できます。', false);
           }
